@@ -181,18 +181,24 @@ Wait2:
 	jsr ResetScroll
 	jsr EnableScreen
 
-	lda #$80
-
 	lda #$00
 	sta counter
 InfLoop:
 	jsr ReadJoy
+
 	lda #%00000001
 	cmp buttons
 	beq Right
+
 	lda #%00000010
 	cmp buttons
 	beq Left
+
+	lda vblanked
+	and #$1f
+	cmp #8
+	beq Left
+
 	jmp InfLoop
 
 Left:
