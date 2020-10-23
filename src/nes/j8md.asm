@@ -24,12 +24,9 @@ Bit7 equ	LookupBits+7
 LookupBits:
 	db %00000001,%00000010,%00000100,%00001000,%00010000,%00100000,%01000000,%10000000
 
-z_regs = $20
-z_c = z_regs+2
-z_b = z_regs+3
-
 vblanked = $7f
 counter = $7e
+buttons = $7d
 
 palette:
 	db $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f
@@ -120,80 +117,20 @@ NmiHandler:
 IrqHandler:
 	rti
 
-SwapNibbles:		;$AB -> $BA
-	asl 		;(shift left - bottom bit zero)
-	adc #$80 	;(pop top bit off - add carry)
-	rol 		;(shift carry in)
-	;2 bits moved
-	asl 		;(shift left - bottom bit zero)
-	adc #$80 	;(pop top bit off - add carry)
-	rol 		;(shift carry in)
-	;4 bits moved
+SwapNibbles:
+	asl
+	adc #$80
+	rol
+	asl
+	adc #$80
+	rol
 	rts
-
-
-DecBC:
-	pha
-		lda z_c
-		bne DecBC_b
-		dec z_c
-DecBC_b:
-		dec z_c
-	pla
-	rts
-
-
-
-PlaySound:			;%NVPPPPPP	N=Noise  V=Volume  P=Pitch
-	pha
-		and #%01000000	;Volume bit
-		lsr
-		lsr
-		lsr
-		ora #%00110111	;CCLEVVVV - Fixed Volume, Disable Clock
-		tax
-	pla
-
-	beq PlaySoundSilent
-
-	bit Bit7			;Noise
-	bne PlaySoundNoise
-
-	stx APU_PULSE1_VD
-
-	jsr SwapNibbles		;Swap Pitch Bits --FFffff to ffff--FF
-	pha
-		and #%00000011	;Top 2 bits
-		ora #%11111000
-		sta APU_PULSE1_LEN
-	pla
-	and #%11110000
-	sta APU_PULSE1_FRQ
-
-	lda #%00000001
-PlaySoundSilent:			;A=0 for silent
-	sta APU_CTL_STATUS
-	rts
-
-PlaySoundNoise:
-	stx APU_NOISE_VD
-	and #%00111100
-	lsr
-	lsr
-	sta APU_NOISE_FRQ
-
-	lda #%00001000	;DF-54321 - DMC/IRQ/length counter status/channel enable
-					;We also use this for setting the bottom 3 bits of the noise H freq.
-	sta APU_NOISE_LEN
-	jmp PlaySoundSilent
-
 
 WaitFrame:
 	pha
-		lda #$00
-		sta vblanked
-waitloop:
 		lda vblanked
+waitloop:
+		cmp vblanked
 		beq waitloop
 	pla
 	rts
@@ -238,7 +175,7 @@ Wait2:
 	bit PPU_STATUS
 	bpl Wait2
 
-	jsr WaitFrame
+	;jsr WaitFrame
 	jsr SetPalette
 	jsr LoadAttributes
 	jsr ResetScroll
@@ -249,25 +186,30 @@ Wait2:
 	lda #$00
 	sta counter
 InfLoop:
-	;pha
-	;	jsr PlaySound
-	;	jsr Pause
-	;pla
-	;sec
-	;sbc #1
+	jsr ReadJoy
+	lda #%00000001
+	cmp buttons
+	beq Right
+	lda #%00000010
+	cmp buttons
+	beq Left
+	jmp InfLoop
 
-	pha
-		lda #%10011111
-		sta APU_PULSE1_VD
+Left:
+	lda #%10011111
+	sta APU_PULSE1_VD
 
-		lda #%11111101
-		sta APU_PULSE1_FRQ
+	lda #%11111101
+	sta APU_PULSE1_FRQ
 
-		lda #%11111000
-		sta APU_PULSE1_LEN
-  	pla
+	lda #%11111000
+	sta APU_PULSE1_LEN
+
+	lda #%00000001
+	sta APU_CTL_STATUS
 
 	jsr WaitFrame
+	jsr DisableScreen
 	lda #>VRAM_PALETTE
 	sta PPU_ADDR
 	lda #<VRAM_PALETTE
@@ -275,29 +217,37 @@ InfLoop:
 	lda counter
 	sta PPU_DATA
 	inc counter
+	jsr EnableScreen
 
-	jsr Delay
+	jmp InfLoop
+
+Right:
+	lda #%00000000
+	sta APU_PULSE1_FRQ
+
 	lda #%00000000
 	sta APU_CTL_STATUS
-	;jsr Pause
+
 	jmp InfLoop
+
+ReadJoy:
+    lda #$01
+    sta JOY1
+    sta buttons
+    lsr a
+    sta JOY1
+joyloop:
+    lda JOY1
+    lsr a
+    rol buttons
+    bcc joyloop
+    rts
 
 Delay:
 	ldx #$ff
+delloop:
 	dex
-	bne Delay
-	rts
-
-Pause:
-	lda #$50
-	sta z_b
-	lda #00
-	sta z_c
-DelayAgain2:
-	jsr DecBC
-	lda z_b
-	ora z_c
-	bne DelayAgain2
+	bne delloop
 	rts
 
 ; Vectors
