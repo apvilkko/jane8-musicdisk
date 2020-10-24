@@ -27,6 +27,10 @@ LookupBits:
 vblanked = $7f
 counter = $7e
 buttons = $7d
+dataptr = $7b
+seqcount = $7a
+tempo = $79
+temp = $78
 
 palette:
 	db $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f
@@ -41,6 +45,8 @@ attributes:
 	db %00000000, %00000000, %00000000, %01001110, %00000000, %00000000, %00000000, %00000000
 	db %00000000, %00000000, %00000000, %01001110, %00000000, %00000000, %00000000, %00000000
 	db %00000000, %00000000, %00000000, %01001110, %00000000, %00000000, %00000000, %00000000
+
+	include "trackdata.asm"
 
 ClearPalette:
 	lda #>VRAM_PALETTE
@@ -112,7 +118,7 @@ EnableScreen:
 
 NmiHandler:
 	php
-	inc vblanked
+		inc vblanked
 	plp
 IrqHandler:
 	rti
@@ -152,6 +158,13 @@ caloop:
 	bne caloop
 	rts
 
+ResetDataPtr:
+	lda #<cybass1
+	sta dataptr
+	lda #>cybass1
+	sta dataptr+1
+	rts
+
 Start:
 	sei
 	cld
@@ -175,7 +188,6 @@ Wait2:
 	bit PPU_STATUS
 	bpl Wait2
 
-	;jsr WaitFrame
 	jsr SetPalette
 	jsr LoadAttributes
 	jsr ResetScroll
@@ -183,6 +195,17 @@ Wait2:
 
 	lda #$00
 	sta counter
+	sta seqcount
+
+	; TODO read tempo
+	lda #34
+	sta tempo
+
+	lda #%00000111
+	sta APU_CTL_STATUS
+
+	jsr ResetDataPtr
+
 InfLoop:
 	jsr ReadJoy
 
@@ -194,25 +217,57 @@ InfLoop:
 	cmp buttons
 	beq Left
 
-	lda vblanked
-	and #$1f
-	cmp #8
-	beq Left
+
+	; Trigger by 16th note.
+	; Dividing tempo on integer logic results in approximate higher tempos (>120 bpm).
+	lda tempo
+	lsr ; divide by 4
+	lsr
+	sta temp
+	lda seqcount
+	adc temp
+	cmp vblanked
+	beq SeqTrigger
 
 	jmp InfLoop
 
+SeqTrigger:
+	lda vblanked
+	sta seqcount
 Left:
-	lda #%10011111
-	sta APU_PULSE1_VD
+	;lda #%10011111
+	;sta APU_PULSE1_VD
+	;lda #%11111101
+	;sta APU_PULSE1_FRQ
+	;lda #%11111000
+	;sta APU_PULSE1_LEN
 
-	lda #%11111101
-	sta APU_PULSE1_FRQ
+	lda #%01000000
+	sta APU_TRI_LC
+	ldy #0
+	lda (dataptr),y
+	cmp #$ff
+	beq resetdata1
+	jmp skipreset1
+resetdata1:
+	jsr ResetDataPtr
+	ldy #0
+	lda (dataptr),y
+skipreset1:
+	sta APU_TRI_FRQ
+	iny
+	lda (dataptr),y
+	sta APU_TRI_LEN
+	iny
 
-	lda #%11111000
-	sta APU_PULSE1_LEN
+	inc dataptr
+	inc dataptr
 
-	lda #%00000001
-	sta APU_CTL_STATUS
+	jmp skipreset
+
+resetdata:
+	jsr ResetDataPtr
+skipreset:
 
 	jsr WaitFrame
 	jsr DisableScreen
@@ -229,10 +284,11 @@ Left:
 
 Right:
 	lda #%00000000
-	sta APU_PULSE1_FRQ
+	;sta APU_PULSE1_FRQ
+	sta APU_TRI_FRQ
 
-	lda #%00000000
-	sta APU_CTL_STATUS
+	;lda #%00000000
+	;sta APU_CTL_STATUS
 
 	jmp InfLoop
 
@@ -248,13 +304,6 @@ joyloop:
     rol buttons
     bcc joyloop
     rts
-
-Delay:
-	ldx #$ff
-delloop:
-	dex
-	bne delloop
-	rts
 
 ; Vectors
 	org $fffa
