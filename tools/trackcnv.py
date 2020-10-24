@@ -59,16 +59,30 @@ def midi_to_tval(midinote, triangle=False, standard='NTSC'):
 REF_CODE = 0xf0
 END_CODE = 0xff
 SECTION_SPLIT = 0xfe
+TRACK_TYPE = 0xfc
+
+NOISE = 0x1
+SQUARE = 0x2
+TRIANGLE = 0x3
 
 
 def to_hex(x):
     return x if type(x) == str else f'${x:02x}'
 
 
+def get_track_type(s):
+    if 'bass' in s:
+        return TRIANGLE
+    elif 'bd' in s:
+        return NOISE
+    return SQUARE
+
+
 def handle_item(dout, k, value):
-    isTri = 'bass' in k
+    isTri = get_track_type(k) == TRIANGLE
+    isSqu = get_track_type(k) == SQUARE
     if value == '.':
-        dout += [0, 0]
+        dout += ([0] * (4 if isSqu else 3))
     elif '_' in value:
         parts = value.split('*')
         ref = trackKey + parts[0][1:]
@@ -77,12 +91,23 @@ def handle_item(dout, k, value):
     else:
         tval = midi_to_tval(int(value, 10), isTri)
         lo = tval & 0xff
-        notelen = 0x01  # TODO calc proper length
+        notelen = 0b10000  # TODO calc proper length
         hi = ((tval >> 8) & 0xff) | notelen << 3
-        dout += [lo, hi]
+        if isSqu:
+            dutyCycle = 0x2
+            haltFlag = 0
+            constVolFlag = 0x1
+            volume = 0xf
+            vd = volume | (constVolFlag << 4) | (
+                haltFlag << 5) | (dutyCycle << 6)
+            swp = 0
+            dout += [vd, swp, lo, hi]
+        else:
+            lc = 0x7f
+            dout += [lc, lo, hi]
 
 
-def output_section(out, k, v):
+def output_section(out, k, v, isClip=False):
     out.append(f"{trackKey + k.replace('_','')}:")
     dout = []
     for value in v:
@@ -93,6 +118,8 @@ def output_section(out, k, v):
         else:
             handle_item(dout, k, value)
     dout += [END_CODE]
+    if isClip:
+        dout = [TRACK_TYPE, get_track_type(k)] + dout
     out.append(f"\tdb {','.join([to_hex(x) for x in dout])}")
 
 
@@ -102,7 +129,7 @@ def output_nes(data):
         f"{trackKey + 'tempo'}:\n\tdb ${int(data['meta']['_tempo'][0], 10):02x}")
 
     for k, v in data['clips'].items():
-        output_section(out, k, v)
+        output_section(out, k, v, True)
 
     for k, v in data['sections'].items():
         output_section(out, k, v)
