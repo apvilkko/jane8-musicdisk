@@ -21,6 +21,8 @@ REF_COMMAND = $f0
 INSTR_TYPE = $fc
 TYPE_SQU = 2
 TYPE_TRI = 3
+SIZE_OF_CLIP = 8
+REPEATS_OFFSET = 4
 
 ;--------------------------------------------------
 ; Zero page variables
@@ -36,6 +38,7 @@ temp = $77
 offset = $76
 flags = $75
 flags2 = $74
+temp2 = $73
 trackPtr = $70
 segmentStart = $60
 clipStart = $40
@@ -238,8 +241,7 @@ StoreClipFlags:
 	rol
 	sta flags2
 	dey
-	cpy #-1
-	bne ClipLoop
+	bpl ClipLoop
 
 	ldy #0
 	; advance segment if clips did not play
@@ -302,25 +304,33 @@ NewSegmentItem:
 	jmp ReturnFromSegment
 ProcessClipRef:
 	iny
-	lda (segmentStart),y
+	lda (segmentStart),y ; addr lo
 	ldx offset
 	sta clipStart,x
+	inx
+	inx
+	sta clipStart,x ; copy at +2
+	dex
+	dex
 	iny
-	lda (segmentStart),y
+	lda (segmentStart),y ; addr hi
 	inx
 	sta clipStart,x
+	inx
+	inx
+	sta clipStart,x ; copy at +2
 	iny
-	lda (segmentStart),y
+	lda (segmentStart),y ; total repeats
 	inx
 	sta clipStart,x
-	lda #0
+	lda #0 ; current repeats
 	inx
 	sta clipStart,x
 	incptra segmentStart,4
 IncreaseClipIndex:
 	lda offset
 	clc
-	adc #5
+	adc #SIZE_OF_CLIP
 	sta offset
 	jmp ContinueSegment
 SegmentFinished:
@@ -337,14 +347,15 @@ ReturnFromSegment:
 ; - Clip pointer pointed by z_l is updated
 ; - Carry is set if clip advanced (played something)
 ProcessClip:
-	; multiply a (=index) by 5 to get offset
+	; multiply a (=index) by SIZE_OF_CLIP to get offset
 	tax
 	clc
 	sta temp
+	ldy #SIZE_OF_CLIP-1
+AddMore:
 	adc temp
-	adc temp
-	adc temp
-	adc temp
+	dey
+	bne AddMore
 	sta offset ; offset points to the clip data (of current index) position in zero page
 
 	lda z_l
@@ -377,16 +388,18 @@ ContinueClip:
 	jmp ClipFinished
 ProcessClipSubRef:
 	iny
-	lda (z_d),y
+	lda (z_d),y ; addr lo
 	sta z_d-SUBCLIP_OFFSET
-	iny
-	lda (z_d),y
-	sta z_d-SUBCLIP_OFFSET+1
-	iny
-	lda (z_d),y
 	sta z_d-SUBCLIP_OFFSET+2
-	lda #0
+	iny
+	lda (z_d),y ; addr hi
+	sta z_d-SUBCLIP_OFFSET+1
 	sta z_d-SUBCLIP_OFFSET+3
+	iny
+	lda (z_d),y ; total repeats
+	sta z_d-SUBCLIP_OFFSET+4
+	lda #0 ; current repeats
+	sta z_d-SUBCLIP_OFFSET+5
 	incptra z_d,4
 	jmp SubClipFinished
 ReadType:
@@ -455,6 +468,48 @@ noise:
 	incptra z_d,3
 	jmp PlayedSomething
 ClipFinished:
+	sty temp2
+
+	; check for repeat
+	lda offset
+	clc
+	adc #REPEATS_OFFSET
+	tay
+	lda (z_b),y
+	sta temp ;  total repeats
+	cmp #0
+	beq SkipRepeatCheck
+	iny
+	lda (z_b),y ; current repeats
+	; add this round
+	clc
+	adc #1
+	sta (z_b),y ; store the new current repeats
+	cmp temp
+	beq OkToClearClip
+	; reset clip ptr
+	dey
+	dey
+	lda (z_b),y ; orig addr hi
+	dey
+	dey ; to addr hi
+	sta (z_b),y
+	iny
+	lda (z_b),y ; orig addr lo
+	dey
+	dey ; to addr lo
+	sta (z_b),y
+
+	ldx #0
+	jmp SetPlayedFlag
+
+SkipRepeatCheck:
+	ldx #0
+	jmp RestorePointer
+
+OkToClearClip:
+	ldy temp2
+
 	lda #0
 	sta z_d,y
 	iny
@@ -474,7 +529,7 @@ RestorePointer:
 	lda z_e
 	iny
 	sta (z_b),y
-
+SetPlayedFlag:
 	cpx #0
 	bne WasNotFinished
 	jmp WasFinished
