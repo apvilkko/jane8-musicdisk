@@ -299,12 +299,7 @@ ContinueSegment:
 	jmp SegmentFinished
 NewSegmentItem:
 	incptra segmentStart,1
-	; increase clip index
-	lda offset
-	clc
-	adc #5
-	sta offset
-	jmp ContinueSegment
+	jmp ReturnFromSegment
 ProcessClipRef:
 	iny
 	lda (segmentStart),y
@@ -322,7 +317,12 @@ ProcessClipRef:
 	inx
 	sta clipStart,x
 	incptra segmentStart,4
-	jmp ReturnFromSegment
+IncreaseClipIndex:
+	lda offset
+	clc
+	adc #5
+	sta offset
+	jmp ContinueSegment
 SegmentFinished:
 	lda #0
 	sta segmentStart
@@ -345,13 +345,13 @@ ProcessClip:
 	adc temp
 	adc temp
 	adc temp
-	sta offset
+	sta offset ; offset points to the clip data (of current index) position in zero page
 
 	lda z_l
 	sta z_b ; z_b is the original pointer (points to zero page where the address is)
 	ldy offset
 	lda (z_b),y
-	sta z_d	; z_de is the pointer we advance
+	sta z_d	; z_de is the pointer we advance (points to actual data)
 	iny
 	lda (z_b),y
 	sta z_e
@@ -366,7 +366,7 @@ ProcessClip:
 	jmp ClipFinished
 
 ContinueClip:
-	ldy offset
+	ldy #0
 	lda (z_d),y
 	cmp #REF_COMMAND
 	beq ProcessClipSubRef
@@ -391,35 +391,37 @@ ProcessClipSubRef:
 	jmp SubClipFinished
 ReadType:
 	iny
+	lda (z_d),y
+	sta temp ; instr data to temp
+
+	; calculate the position of instr type data position, to y
 	lda offset
 	clc
 	adc #4
-	tax
-	lda (z_d),y
-	pha
-		txa
-		tay
-	pla
+	tay
+
+	lda temp
 	sta (z_b),y ; store clip instrument
 	incptra z_d,2
 	ldy #0
 	jmp ContinueClip
 PlaySound:
-	iny
-	iny
-	iny
-	iny
 	pha
+		ldy offset
+		iny
+		iny
+		iny
+		iny
 		lda (z_b),y ; read clip instrument
 		tax
 	pla
+	ldy #0
 	cpx #TYPE_TRI
 	beq triangle
 	cpx #TYPE_SQU
 	beq square
 	jmp noise
 triangle:
-	ldy offset
 	sta APU_TRI_LC
 	iny
 	lda (z_d),y
@@ -430,7 +432,6 @@ triangle:
 	incptra z_d,3
 	jmp PlayedSomething
 square:
-	ldy offset
 	sta APU_PULSE1_VD
 	iny
 	lda (z_d),y
@@ -444,7 +445,6 @@ square:
 	incptra z_d,4
 	jmp PlayedSomething
 noise:
-	ldy offset
 	sta APU_NOISE_VD
 	iny
 	lda (z_d),y

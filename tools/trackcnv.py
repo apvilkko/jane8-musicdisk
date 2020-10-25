@@ -15,7 +15,7 @@ def main():
     section = None
     for line in lines:
         line = line.strip()
-        if not len(line):
+        if not len(line) or line.startswith(';'):
             continue
         if ':' in line:
             section = line.replace(':', '').strip()
