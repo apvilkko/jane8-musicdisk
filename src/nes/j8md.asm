@@ -1,6 +1,8 @@
 	org $bff0
 
+;--------------------------------------------------
 ; ROM header
+;--------------------------------------------------
 	db "NES",$1a
 	db $01 ; PRG ROM
 	db $00 ; CHR ROM
@@ -9,10 +11,20 @@
 	db 0 ; PRG RAM size
 	db 0,0,0,0,0,0,0
 
+;--------------------------------------------------
+; Constants
+;--------------------------------------------------
+SUBCLIP_OFFSET = $20
+END_STREAM = $ff
+END_SEGMENT = $fe
+REF_COMMAND = $f0
+INSTR_TYPE = $fc
+TYPE_SQU = 2
+TYPE_TRI = 3
 
-	include "defs.asm"
-
+;--------------------------------------------------
 ; Zero page variables
+;--------------------------------------------------
 vblanked = $7f
 counter = $7e
 buttons = $7d
@@ -22,20 +34,30 @@ tempo = $79
 tempo4 = $78
 temp = $77
 offset = $76
-offset2 = $75
+flags = $75
+flags2 = $74
 trackPtr = $70
 segmentStart = $60
 clipStart = $40
-subclipStart = $20
+subclipStart = clipStart - SUBCLIP_OFFSET
+z_l = $10
+z_h = $11
+z_b = $12
+z_c = $13
+z_d = $14
+z_e = $15
+z_bc = z_b
+z_lh = z_l
+z_de = z_d
 
-; constants
-END_STREAM = $ff
-END_SEGMENT = $fe
-REF_COMMAND = $f0
-INSTR_TYPE = $fc
-TYPE_SQU = 2
-TYPE_TRI = 3
+;--------------------------------------------------
+; NES registers etc.
+;--------------------------------------------------
+	include "defs.asm"
 
+;--------------------------------------------------
+; Palette etc.
+;--------------------------------------------------
 palette:
 	db $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f
 	db $06,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f, $0f,$0f,$0f,$0f
@@ -50,78 +72,25 @@ attributes:
 	db %00000000, %00000000, %00000000, %01001110, %00000000, %00000000, %00000000, %00000000
 	db %00000000, %00000000, %00000000, %01001110, %00000000, %00000000, %00000000, %00000000
 
+;--------------------------------------------------
+; Music track data
+;--------------------------------------------------
 	include "trackdata.asm"
 
 trackstart = cytrack
-datastart = cylead1
 
-ClearPalette:
-	lda #>VRAM_PALETTE
-	sta PPU_ADDR
-	lda #<VRAM_PALETTE
-	sta PPU_ADDR
-	lda #$0f ; black
-	ldx #$20 ; loop 32 times
-cploop:
-	sta PPU_DATA
-	dex
-	bne cploop
+;--------------------------------------------------
+; Includes
+;--------------------------------------------------
 
-ClearVRAM:
-	lda #>VRAM_NAMETABLE
-	sta PPU_ADDR
-	lda #<VRAM_NAMETABLE
-	sta PPU_ADDR
-	ldy #$10 ; loop 16 * 256 times
-cvloop:
-	sta PPU_DATA
-	inx
-	bne cvloop
-	dey
-	bne cvloop
+	include "macros.asm"
+	include "video.asm"
+	include "sound.asm"
+	include "input.asm"
 
-SetPalette:
-	lda #>VRAM_PALETTE
-	sta PPU_ADDR
-	lda #<VRAM_PALETTE
-	sta PPU_ADDR
-	ldx #$00
-	ldy #$20 ; loop 32 times
-setpaletteloop:
-	lda palette,x
-	sta PPU_DATA
-	inx
-	dey
-	bne setpaletteloop
-	rts
-
-LoadAttributes:
-	lda PPU_STATUS
-	lda #>PPU_ATTRIBUTES
-	sta PPU_ADDR
-	lda #<PPU_ATTRIBUTES
-	sta PPU_ADDR
-	ldx #$00
-laloop:
-	lda attributes,x
-	sta PPU_DATA
-	inx
-	cpx #$40
-	bne laloop
-	rts
-
-DisableScreen:
-	lda #%00000000
-	sta PPU_MASK
-	sta PPU_CTRL
-	rts
-
-EnableScreen:
-	lda #%00011000
-	sta PPU_MASK
-	lda #$80
-	sta PPU_CTRL
-	rts
+;--------------------------------------------------
+; Interrupt handlers
+;--------------------------------------------------
 
 NmiHandler:
 	php
@@ -130,64 +99,27 @@ NmiHandler:
 IrqHandler:
 	rti
 
-	macro incptr, ptr
-		clc
-		adc \1
-		sta \1
-		lda \1+1
-		adc #0
-		sta \1+1
-	endmacro
-
-	macro incptra, ptr, amount
-		lda #\2
-		incptr \1
-	endmacro
-
-WaitFrame:
-	pha
-		lda vblanked
-waitloop:
-		cmp vblanked
-		beq waitloop
-	pla
-	rts
-
-ResetScroll:
-	lda #0
-	sta PPU_SCROLL
-	lda #0-8
-	sta PPU_SCROLL
-	rts
-
-	macro store16, src, dest
-		lda #<\1
-		sta \2
-		lda #>\1
-		sta \2+1
-	endmacro
+;--------------------------------------------------
+; Subroutines
+;--------------------------------------------------
 
 ResetTrackPtr:
 	store16 trackstart,trackPtr
 	rts
 
-ResetDataPtr:
-;	store16 datastart,dataptr
-;CheckType:
-;	ldy #0
-;	lda (dataptr),y
-	;cmp #$fc
-	;beq ReadType
-	;rts
-;ReadType:
-	;iny
-	;lda (dataptr),y
-	;sta tracktype
-	;lda #2
-	;jsr IncPtr
+ClearZeroPage:
+	lda #0
+	ldy #$ff
+	sta temp
+czloop:
+	sta (temp),y
+	dey
+	bne czloop
 	rts
 
-	include "sound.asm"
+;--------------------------------------------------
+; Program start
+;--------------------------------------------------
 
 Start:
 	sei
@@ -207,6 +139,7 @@ Wait1:
 	jsr ClearVRAM
 	jsr ClearPalette
 	jsr ClearAPU
+	jsr ClearZeroPage
 
 Wait2:
 	bit PPU_STATUS
@@ -225,7 +158,6 @@ Wait2:
 	sta APU_CTL_STATUS
 
 	jsr ResetTrackPtr
-	;jsr ResetDataPtr
 
 	; TODO read tempo
 	lda #34
@@ -260,15 +192,67 @@ SeqTrigger:
 	sta seqcount
 AdvanceTrack:
 	lda #0
-	jsr ProcessClip
-	lda #1
-	jsr ProcessClip
-	lda #2
-	jsr ProcessClip
-	lda #3
-	jsr ProcessClip
+	sta flags
+	sta flags2
+
+	; Process subclips
+	lda #subclipStart
+	sta z_l
+
 	ldy #0
+
+SubClipLoop:
+	tya
+	pha
+	jsr ProcessClip
+	pla
+	tay
+	lda flags
+	rol
+	sta flags
+	iny
+	cpy #4
+	bne SubClipLoop
+
+	;flags should now contain 00001234 where 1 tells if first subclip played anything etc
+
+	; Process clips
+	lda #clipStart
+	sta z_l
+
+	ldy #3
+ClipLoop:
+	lda flags
+	and #%00000001
+	bne SkipClip
+	tya
+	pha
+	jsr ProcessClip
+	pla
+	tay
+	jmp StoreClipFlags
+SkipClip:
+	clc
+StoreClipFlags:
+	lda flags2
+	rol
+	sta flags2
+	dey
+	cpy #-1
+	bne ClipLoop
+
+	ldy #0
+	; advance segment if clips did not play
+	lda flags2
+	bne ContinueTrack
 	jsr ProcessSegment
+ContinueTrack:
+	; if there's an active segment, don't advance
+	lda segmentStart
+	clc
+	adc segmentStart+1
+	bne InfLoop
+
 	lda (trackPtr),y
 	cmp #REF_COMMAND
 	beq ProcessRef
@@ -288,8 +272,7 @@ ProcessRef:
 	lda #0
 	sta segmentStart+3
 	incptra trackPtr,4
-	jsr ProcessSegment
-	jmp AdvanceTrack
+	jmp InfLoop
 ResetTrack:
 	jsr ResetTrackPtr
 TrackFinished:
@@ -299,9 +282,9 @@ ProcessSegment:
 	lda segmentStart
 	clc
 	adc segmentStart+1
-	bne CheckOk
+	bne SegmentExists
 	jmp SegmentFinished
-CheckOk:
+SegmentExists:
 	lda #0
 	sta offset
 ContinueSegment:
@@ -316,6 +299,11 @@ ContinueSegment:
 	jmp SegmentFinished
 NewSegmentItem:
 	incptra segmentStart,1
+	; increase clip index
+	lda offset
+	clc
+	adc #5
+	sta offset
 	jmp ContinueSegment
 ProcessClipRef:
 	iny
@@ -334,17 +322,20 @@ ProcessClipRef:
 	inx
 	sta clipStart,x
 	incptra segmentStart,4
-	lda offset
-	clc
-	adc #5
-	sta offset
-	jmp ContinueSegment
+	jmp ReturnFromSegment
 SegmentFinished:
 	lda #0
 	sta segmentStart
 	sta segmentStart+1
+ReturnFromSegment:
 	rts
 
+; Input:
+; - Clip pointer in z_l
+; - Subindex (offset) in A
+; Post-conditions:
+; - Clip pointer pointed by z_l is updated
+; - Carry is set if clip advanced (played something)
 ProcessClip:
 	; multiply a (=index) by 5 to get offset
 	tax
@@ -355,49 +346,62 @@ ProcessClip:
 	adc temp
 	adc temp
 	sta offset
+
+	lda z_l
+	sta z_b ; z_b is the original pointer (points to zero page where the address is)
 	ldy offset
-	lda clipStart
+	lda (z_b),y
+	sta z_d	; z_de is the pointer we advance
+	iny
+	lda (z_b),y
+	sta z_e
+	dey
+
+
+	; Check if current pointer is 0 => then do nothing
+	lda z_d
 	clc
-	adc clipStart+1
+	adc z_e
 	bne ContinueClip
 	jmp ClipFinished
+
 ContinueClip:
 	ldy offset
-	lda (clipStart),y
+	lda (z_d),y
 	cmp #REF_COMMAND
 	beq ProcessClipSubRef
 	cmp #INSTR_TYPE
 	beq ReadType
 	cmp #END_STREAM
-	beq ClipFinished
-	jmp PlaySound
+	bne PlaySound
+	jmp ClipFinished
 ProcessClipSubRef:
 	iny
-	lda (clipStart),y
-	ldx offset2
-	sta subclipStart,x
+	lda (z_d),y
+	sta z_d-SUBCLIP_OFFSET
 	iny
-	lda (clipStart),y
-	inx
-	sta subclipStart,x
+	lda (z_d),y
+	sta z_d-SUBCLIP_OFFSET+1
 	iny
-	lda (clipStart),y
-	inx
-	sta subclipStart,x
+	lda (z_d),y
+	sta z_d-SUBCLIP_OFFSET+2
 	lda #0
-	inx
-	sta subclipStart,x
-	incptra clipStart,4
-	jmp ContinueClip
+	sta z_d-SUBCLIP_OFFSET+3
+	incptra z_d,4
+	jmp SubClipFinished
 ReadType:
 	iny
 	lda offset
 	clc
 	adc #4
 	tax
-	lda (clipStart),y
-	sta clipStart,x
-	incptra clipStart,2
+	lda (z_d),y
+	pha
+		txa
+		tay
+	pla
+	sta (z_b),y ; store clip instrument
+	incptra z_d,2
 	ldy #0
 	jmp ContinueClip
 PlaySound:
@@ -405,7 +409,10 @@ PlaySound:
 	iny
 	iny
 	iny
-	ldx clipStart,y
+	pha
+		lda (z_b),y ; read clip instrument
+		tax
+	pla
 	cpx #TYPE_TRI
 	beq triangle
 	cpx #TYPE_SQU
@@ -413,55 +420,73 @@ PlaySound:
 	jmp noise
 triangle:
 	ldy offset
-	jsr PlayTriangle
-	ldy #0
-	jmp played
+	sta APU_TRI_LC
+	iny
+	lda (z_d),y
+	sta APU_TRI_FRQ
+	iny
+	lda (z_d),y
+	sta APU_TRI_LEN
+	incptra z_d,3
+	jmp PlayedSomething
 square:
 	ldy offset
-	jsr PlaySquare
-	ldy #0
-	jmp played
+	sta APU_PULSE1_VD
+	iny
+	lda (z_d),y
+	sta APU_PULSE1_SWP
+	iny
+	lda (z_d),y
+	sta APU_PULSE1_FRQ
+	iny
+	lda (z_d),y
+	sta APU_PULSE1_LEN
+	incptra z_d,4
+	jmp PlayedSomething
 noise:
 	ldy offset
-	jsr PlayNoise
-	ldy #0
-	jmp played
-played:
-	jmp InfLoop
+	sta APU_NOISE_VD
+	iny
+	lda (z_d),y
+	sta APU_NOISE_FRQ
+	iny
+	lda (z_d),y
+	sta APU_NOISE_LEN
+	incptra z_d,3
+	jmp PlayedSomething
 ClipFinished:
 	lda #0
-	sta clipStart,y
+	sta z_d,y
 	iny
-	sta clipStart,y
+	sta z_d,y
+	ldx #0
+	jmp RestorePointer
+PlayedSomething:
+	ldx #1
+	jmp RestorePointer
+SubClipFinished:
+	ldx #0
+RestorePointer:
+	; z_de holds now the updated address
+	ldy offset
+	lda z_d
+	sta (z_b),y
+	lda z_e
+	iny
+	sta (z_b),y
+
+	cpx #0
+	bne WasNotFinished
+	jmp WasFinished
+WasNotFinished:
+	sec
+	jmp ReturnFromClip
+WasFinished:
+	clc
+ReturnFromClip:
 	rts
 
-PlayNextItem:
-	ldy #0
-	lda (dataptr),y
-
-	cmp #END_STREAM
-	beq resetdata1
-	jmp PlaySound1
-resetdata1:
-	jsr ResetDataPtr
-	jmp PlayNextItem
-PlaySound1:
-	;ldx tracktype
-	cpx #TYPE_TRI
-	beq triangle1
-	cpx #TYPE_SQU
-	beq square1
-	jmp noise1
-triangle1:
-	jsr PlayTriangle
-	jmp AfterPlay
-square1:
-	jsr PlaySquare
-	jmp AfterPlay
-noise1:
-	jsr PlayNoise
-AfterPlay:
-
+SwitchColor:
 	jsr WaitFrame
 	jsr DisableScreen
 	lda #>VRAM_PALETTE
@@ -472,33 +497,11 @@ AfterPlay:
 	sta PPU_DATA
 	inc counter
 	jsr EnableScreen
-
 	jmp InfLoop
 
-Right:
-	;lda #%00000000
-	;sta APU_PULSE1_FRQ
-	;sta APU_TRI_FRQ
-
-	;lda #%00000000
-	;sta APU_CTL_STATUS
-
-	jmp InfLoop
-
-ReadJoy:
-    lda #$01
-    sta JOY1
-    sta buttons
-    lsr a
-    sta JOY1
-joyloop:
-    lda JOY1
-    lsr a
-    rol buttons
-    bcc joyloop
-    rts
-
+;--------------------------------------------------
 ; Vectors
+;--------------------------------------------------
 	org $fffa
 	dw NmiHandler
 	dw Start
