@@ -39,6 +39,7 @@ offset = $76
 flags = $75
 flags2 = $74
 temp2 = $73
+seqstep = $72
 trackPtr = $70
 segmentStart = $60
 clipStart = $40
@@ -156,6 +157,7 @@ Wait2:
 	lda #$00
 	sta counter
 	sta seqcount
+	sta seqstep
 
 	lda #%00001111
 	sta APU_CTL_STATUS
@@ -191,8 +193,12 @@ InfLoop:
 	jmp InfLoop
 
 SeqTrigger:
+	ldy seqstep
+	iny
+	sty seqstep
 	lda vblanked
 	sta seqcount
+
 AdvanceTrack:
 	lda #0
 	sta flags
@@ -248,13 +254,46 @@ StoreClipFlags:
 	lda flags2
 	bne ContinueTrack
 	jsr ProcessSegment
+
+	; if segment produced something to play start playing it
+	; check every SIZE_OF_CLIP from subclipStart, total of 4 + 4
+
+	lda #SIZE_OF_CLIP
+	asl
+	asl
+	asl
+	sec
+	sbc #7 ; start at 128 - 7; check 2 bytes every 8 bytes
+	tay
+CheckClipPtrs:
+	lda subclipStart,y
+	bne WasNotZero
+WasZero1:
+	dey
+	lda subclipStart,y
+	bne WasNotZero
+WasZero2:
+	dey
+	dey
+	dey
+	dey
+	dey
+	dey
+	dey
+	bpl CheckClipPtrs
+	ldy #0
+	jmp ContinueTrack
+WasNotZero:
+	jmp AdvanceTrack
+
 ContinueTrack:
 	; if there's an active segment, don't advance
 	lda segmentStart
 	clc
 	adc segmentStart+1
-	bne InfLoop
-
+	beq NoActiveSegment
+	jmp InfLoop
+NoActiveSegment:
 	lda (trackPtr),y
 	cmp #REF_COMMAND
 	beq ProcessRef
@@ -374,7 +413,7 @@ AddMore:
 	clc
 	adc z_e
 	bne ContinueClip
-	jmp ClipFinished
+	jmp SkipRepeatCheck
 
 ContinueClip:
 	ldy #0
@@ -410,7 +449,7 @@ ReadType:
 	; calculate the position of instr type data position, to y
 	lda offset
 	clc
-	adc #4
+	adc #6
 	tay
 
 	lda temp
@@ -420,11 +459,10 @@ ReadType:
 	jmp ContinueClip
 PlaySound:
 	pha
-		ldy offset
-		iny
-		iny
-		iny
-		iny
+		lda offset
+		clc
+		adc #6
+		tay
 		lda (z_b),y ; read clip instrument
 		tax
 	pla
@@ -510,11 +548,14 @@ SkipRepeatCheck:
 OkToClearClip:
 	ldy temp2
 
+	ldx #2
 	lda #0
+ClearMore:
 	sta z_d,y
 	iny
-	sta z_d,y
-	ldx #0
+	dex
+	bne ClearMore
+	; x should be 0
 	jmp RestorePointer
 PlayedSomething:
 	ldx #1
