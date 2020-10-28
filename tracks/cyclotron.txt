@@ -11,7 +11,9 @@ _bd1  36 . . . 36 . . . 36 . . . 36 . . .
 _bd2  _bd1*3  36 . . . 36 . . . 36 . . . 36 36 36 .
 
 sections:
+;_intro  _bd1*4
 _intro  _bass1*4 _bd2 _lead1*2
+;_intro  _bd2 _lead1*2
 ;_sect1  _bass1 _lead2
 ;_sect2  _test1*2
 

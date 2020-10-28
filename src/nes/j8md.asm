@@ -21,6 +21,7 @@ REF_COMMAND = $f0
 INSTR_TYPE = $fc
 TYPE_SQU = 2
 TYPE_TRI = 3
+TYPE_BD = 4
 SIZE_OF_CLIP = 8
 REPEATS_OFFSET = 4
 
@@ -41,6 +42,7 @@ flags2 = $74
 temp2 = $73
 seqstep = $72
 trackPtr = $70
+;clipFlags = $6f
 segmentStart = $60
 clipStart = $40
 subclipStart = clipStart - SUBCLIP_OFFSET
@@ -213,7 +215,7 @@ AdvanceTrack:
 SubClipLoop:
 	tya
 	pha
-	jsr ProcessClip
+		jsr ProcessClip
 	pla
 	tay
 	lda flags
@@ -229,14 +231,27 @@ SubClipLoop:
 	lda #clipStart
 	sta z_l
 
+	; Loop clips from highest to lowest
+	; clip 3 0001 subclip flag
+	;      2 0010
+	;      1 0100
+	;      0 1000
+
 	ldy #3
 ClipLoop:
-	lda flags
-	and #%00000001
+	tya
+	tax
+	inx
+	lda #%00010000
+ShiftMore:
+	lsr
+	dex
+	bne ShiftMore
+	and flags
 	bne SkipClip
 	tya
 	pha
-	jsr ProcessClip
+		jsr ProcessClip
 	pla
 	tay
 	jmp StoreClipFlags
@@ -254,37 +269,6 @@ StoreClipFlags:
 	lda flags2
 	bne ContinueTrack
 	jsr ProcessSegment
-
-	; if segment produced something to play start playing it
-	; check every SIZE_OF_CLIP from subclipStart, total of 4 + 4
-
-	lda #SIZE_OF_CLIP
-	asl
-	asl
-	asl
-	sec
-	sbc #7 ; start at 128 - 7; check 2 bytes every 8 bytes
-	tay
-CheckClipPtrs:
-	lda subclipStart,y
-	bne WasNotZero
-WasZero1:
-	dey
-	lda subclipStart,y
-	bne WasNotZero
-WasZero2:
-	dey
-	dey
-	dey
-	dey
-	dey
-	dey
-	dey
-	bpl CheckClipPtrs
-	ldy #0
-	jmp ContinueTrack
-WasNotZero:
-	jmp AdvanceTrack
 
 ContinueTrack:
 	; if there's an active segment, don't advance
@@ -426,19 +410,27 @@ ContinueClip:
 	bne PlaySound
 	jmp ClipFinished
 ProcessClipSubRef:
+	ldx offset
 	iny
 	lda (z_d),y ; addr lo
-	sta z_d-SUBCLIP_OFFSET
-	sta z_d-SUBCLIP_OFFSET+2
+	sta subclipStart,x
+	inx
+	inx
+	sta subclipStart,x
 	iny
 	lda (z_d),y ; addr hi
-	sta z_d-SUBCLIP_OFFSET+1
-	sta z_d-SUBCLIP_OFFSET+3
+	dex
+	sta subclipStart,x
+	inx
+	inx
+	sta subclipStart,x
 	iny
 	lda (z_d),y ; total repeats
-	sta z_d-SUBCLIP_OFFSET+4
+	inx
+	sta subclipStart,x
 	lda #0 ; current repeats
-	sta z_d-SUBCLIP_OFFSET+5
+	inx
+	sta subclipStart,x
 	incptra z_d,4
 	jmp SubClipFinished
 ReadType:
@@ -471,6 +463,8 @@ PlaySound:
 	beq triangle
 	cpx #TYPE_SQU
 	beq square
+	cpx #TYPE_BD
+	beq kickdrum
 	jmp noise
 triangle:
 	sta APU_TRI_LC
@@ -494,6 +488,20 @@ square:
 	lda (z_d),y
 	sta APU_PULSE1_LEN
 	incptra z_d,4
+	jmp PlayedSomething
+kickdrum:
+	cmp #0
+	beq EmptyNote
+	lda #%10011111
+	sta APU_PULSE2_VD
+	lda #%10000010
+	sta APU_PULSE2_SWP
+	lda #%11111111
+	sta APU_PULSE2_FRQ
+	lda #%11111000
+	sta APU_PULSE2_LEN
+EmptyNote:
+	incptra z_d,1
 	jmp PlayedSomething
 noise:
 	sta APU_NOISE_VD
@@ -559,7 +567,12 @@ ClearMore:
 	jmp RestorePointer
 PlayedSomething:
 	ldx #1
-	jmp RestorePointer
+	; check for stream end
+	ldy #0
+	lda (z_d),y
+	cmp #END_STREAM
+	bne RestorePointer
+	jmp ClipFinished
 SubClipFinished:
 	ldx #0
 RestorePointer:

@@ -64,6 +64,9 @@ TRACK_TYPE = 0xfc
 NOISE = 0x1
 SQUARE = 0x2
 TRIANGLE = 0x3
+BD = 0x4
+
+DATA_LENS = [0, 3, 4, 3, 1]
 
 
 def to_hex(x):
@@ -74,7 +77,7 @@ def get_track_type(s):
     if 'bass' in s:
         return TRIANGLE
     elif 'bd' in s:
-        return NOISE
+        return BD
     return SQUARE
 
 
@@ -82,7 +85,7 @@ def handle_item(dout, k, value):
     isTri = get_track_type(k) == TRIANGLE
     isSqu = get_track_type(k) == SQUARE
     if value == '.':
-        dout += ([0] * (4 if isSqu else 3))
+        dout += ([0] * DATA_LENS[get_track_type(k)])
     elif '_' in value:
         parts = value.split('*')
         ref = trackKey + parts[0][1:]
@@ -102,9 +105,11 @@ def handle_item(dout, k, value):
                 haltFlag << 5) | (dutyCycle << 6)
             swp = 0
             dout += [vd, swp, lo, hi]
-        else:
+        elif isTri:
             lc = 0x7f
             dout += [lc, lo, hi]
+        else:
+            dout += [hi]
 
 
 def output_section(out, k, v, isClip=False):
