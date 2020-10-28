@@ -78,14 +78,36 @@ def get_track_type(s):
         return TRIANGLE
     elif 'bd' in s:
         return BD
+    elif 'clap' in s:
+        return NOISE
     return SQUARE
 
 
-def handle_item(dout, k, value):
+delayMemory = {}
+
+
+def get_delay_key(k, i):
+    return f'{k}{i}'
+
+
+def get_vd(volume, constVolFlag, haltFlag, dutyCycle):
+    return volume | (constVolFlag << 4) | (haltFlag << 5) | (dutyCycle << 6)
+
+
+def handle_item(dout, k, value, arr, i):
     isTri = get_track_type(k) == TRIANGLE
     isSqu = get_track_type(k) == SQUARE
+    isNoise = get_track_type(k) == NOISE
+    addDelay = ('lead' in k or 'clap' in k) and not isTri
     if value == '.':
-        dout += ([0] * DATA_LENS[get_track_type(k)])
+        dn = delayMemory.get(get_delay_key(k, i), None)
+        if addDelay and dn:
+            if dn['type'] == SQUARE:
+                dout += [dn['vd'], dn['swp'], dn['lo'], dn['hi']]
+            else:
+                dout += [dn['lc'], dn['lo'], dn['hi']]
+        else:
+            dout += ([0] * DATA_LENS[get_track_type(k)])
     elif '_' in value:
         parts = value.split('*')
         ref = trackKey + parts[0][1:]
@@ -96,32 +118,44 @@ def handle_item(dout, k, value):
         lo = tval & 0xff
         notelen = 0b10000  # TODO calc proper length
         hi = ((tval >> 8) & 0xff) | notelen << 3
+        lc = 0
+        swp = 0
+        dutyCycle = 0x2
+        haltFlag = 0
+        constVolFlag = 0x1
+        volume = 0xf
         if isSqu:
-            dutyCycle = 0x2
-            haltFlag = 0
-            constVolFlag = 0x1
-            volume = 0xf
-            vd = volume | (constVolFlag << 4) | (
-                haltFlag << 5) | (dutyCycle << 6)
-            swp = 0
+            vd = get_vd(volume, constVolFlag, haltFlag, dutyCycle)
             dout += [vd, swp, lo, hi]
         elif isTri:
             lc = 0x7f
             dout += [lc, lo, hi]
+        elif isNoise:
+            lc = 0x1a
+            lo = 0x5
+            hi = 0
+            dout += [lc, lo, hi]
         else:
             dout += [hi]
+        if addDelay:
+            delayTicks = 3
+            vd = get_vd(0x4, constVolFlag, haltFlag, dutyCycle)
+            lc = 0x14
+            delayMemory[get_delay_key(k, i+delayTicks)] = {
+                'type': get_track_type(k), 'vd': vd, 'lo': lo, 'hi': hi, 'lc': lc, 'swp': swp
+            }
 
 
 def output_section(out, k, v, isClip=False):
     out.append(f"{trackKey + k.replace('_','')}:")
     dout = []
-    for value in v:
+    for j, value in enumerate(v):
         if type(value) == list:
-            for x in value:
-                handle_item(dout, k, x)
+            for i, x in enumerate(value):
+                handle_item(dout, k, x, value, i)
             dout += [SECTION_SPLIT]
         else:
-            handle_item(dout, k, value)
+            handle_item(dout, k, value, v, j)
     dout += [END_CODE]
     if isClip:
         dout = [TRACK_TYPE, get_track_type(k)] + dout

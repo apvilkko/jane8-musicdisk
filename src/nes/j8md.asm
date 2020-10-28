@@ -36,13 +36,14 @@ seqcount = $7a
 tempo = $79
 tempo4 = $78
 temp = $77
+tempIndex = $80
 offset = $76
 flags = $75
 flags2 = $74
 temp2 = $73
 seqstep = $72
 trackPtr = $70
-;clipFlags = $6f
+clipFlags = $6f
 segmentStart = $60
 clipStart = $40
 subclipStart = clipStart - SUBCLIP_OFFSET
@@ -240,6 +241,7 @@ SubClipLoop:
 	ldy #3
 ClipLoop:
 	tya
+	sta tempIndex
 	tax
 	inx
 	lda #%00010000
@@ -249,11 +251,13 @@ ShiftMore:
 	bne ShiftMore
 	and flags
 	bne SkipClip
+	sty tempIndex
 	tya
 	pha
 		jsr ProcessClip
 	pla
 	tay
+
 	jmp StoreClipFlags
 SkipClip:
 	clc
@@ -261,6 +265,21 @@ StoreClipFlags:
 	lda flags2
 	rol
 	sta flags2
+
+	ldy clipFlags
+	cpy #1
+	bne ContinueClipLoop
+
+	; clip triggered a subclip, start advancing it immediately
+	ldy tempIndex
+	lda #subclipStart
+	sta z_l
+	jsr ProcessClip
+	lda #clipStart
+	sta z_l
+
+ContinueClipLoop:
+	ldy tempIndex
 	dey
 	bpl ClipLoop
 
@@ -374,6 +393,10 @@ ProcessClip:
 	tax
 	clc
 	sta temp
+
+	ldy #0
+	sty clipFlags
+
 	ldy #SIZE_OF_CLIP-1
 AddMore:
 	adc temp
@@ -432,6 +455,10 @@ ProcessClipSubRef:
 	inx
 	sta subclipStart,x
 	incptra z_d,4
+
+	lda #1
+	sta clipFlags
+
 	jmp SubClipFinished
 ReadType:
 	iny
@@ -504,6 +531,8 @@ EmptyNote:
 	incptra z_d,1
 	jmp PlayedSomething
 noise:
+	cmp #0
+	beq EmptyNoise
 	sta APU_NOISE_VD
 	iny
 	lda (z_d),y
@@ -511,6 +540,7 @@ noise:
 	iny
 	lda (z_d),y
 	sta APU_NOISE_LEN
+EmptyNoise:
 	incptra z_d,3
 	jmp PlayedSomething
 ClipFinished:
