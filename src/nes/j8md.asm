@@ -24,35 +24,42 @@ TYPE_TRI = 3
 TYPE_BD = 4
 SIZE_OF_CLIP = 8
 REPEATS_OFFSET = 4
+SUBCLIP_ENABLE_OFFSET = 7
+MAX_OFFSET = SIZE_OF_CLIP * 4
+
+CLIP_TYPE_TRACK = 0
+CLIP_TYPE_SEGMENT = 1
+CLIP_TYPE_CLIP = 2
+CLIP_TYPE_SUBCLIP = 3
 
 ;--------------------------------------------------
 ; Zero page variables
 ;--------------------------------------------------
+
 vblanked = $7f
 counter = $7e
 buttons = $7d
-dataptr = $7b
+temp = $7c
+offset = $7b
 seqcount = $7a
 tempo = $79
 tempo4 = $78
-temp = $77
-tempIndex = $80
-offset = $76
-flags = $75
-flags2 = $74
-temp2 = $73
-seqstep = $72
-trackPtr = $70
-clipFlags = $6f
-segmentStart = $60
-clipStart = $40
+temp2 = $08
+seqstep = $09
+resetFlag = $0a
+clipType = $0b
+
+trackStart = $70
+segmentStart = trackStart - SUBCLIP_OFFSET
+clipStart = segmentStart - SUBCLIP_OFFSET
 subclipStart = clipStart - SUBCLIP_OFFSET
-z_l = $10
-z_h = $11
-z_b = $12
-z_c = $13
-z_d = $14
-z_e = $15
+
+z_l = $00
+z_h = $01
+z_b = $02
+z_c = $03
+z_d = $04
+z_e = $05
 z_bc = z_b
 z_lh = z_l
 z_de = z_d
@@ -84,8 +91,6 @@ attributes:
 ;--------------------------------------------------
 	include "trackdata.asm"
 
-trackstart = cytrack
-
 ;--------------------------------------------------
 ; Includes
 ;--------------------------------------------------
@@ -111,15 +116,15 @@ IrqHandler:
 ;--------------------------------------------------
 
 ResetTrackPtr:
-	store16 trackstart,trackPtr
+	store16 cytrack,trackStart
+	store16 cytrack,trackStart+2
 	rts
 
 ClearZeroPage:
 	lda #0
 	ldy #$ff
-	sta temp
 czloop:
-	sta (temp),y
+	sta $00,y
 	dey
 	bne czloop
 	rts
@@ -196,206 +201,128 @@ InfLoop:
 	jmp InfLoop
 
 SeqTrigger:
-	ldy seqstep
-	iny
-	sty seqstep
+	inc seqstep
 	lda vblanked
 	sta seqcount
 
-AdvanceTrack:
-	lda #0
-	sta flags
-	sta flags2
-
-	; Process subclips
-	lda #subclipStart
+ProcessFromTrack:
+	lda #CLIP_TYPE_TRACK
+	sta clipType
+	lda #trackStart
 	sta z_l
+	lda #0
+	jsr ProcessClip
 
-	ldy #0
+ProcessFromSegment:
+	lda #CLIP_TYPE_SEGMENT
+	sta clipType
+	lda #segmentStart
+	sta z_l
+	lda #0
+	jsr ProcessClip
 
-SubClipLoop:
-	tya
-	pha
-		jsr ProcessClip
-	pla
-	tay
-	lda flags
-	rol
-	sta flags
-	iny
-	cpy #4
-	bne SubClipLoop
-
-	;flags should now contain 00001234 where 1 tells if first subclip played anything etc
+	lda resetFlag
+	bne ProcessFromTrack
 
 	; Process clips
+	lda #CLIP_TYPE_CLIP
+	sta clipType
 	lda #clipStart
 	sta z_l
-
-	; Loop clips from highest to lowest
-	; clip 3 0001 subclip flag
-	;      2 0010
-	;      1 0100
-	;      0 1000
-
 	ldy #3
-ClipLoop:
+ProcessClipLoop:
 	tya
-	sta tempIndex
-	tax
-	inx
-	lda #%00010000
-ShiftMore:
-	lsr
+	pha
+		jsr ProcessClip
+	pla
+	tay
+	dey
+	bpl ProcessClipLoop
+
+	; check if all clips are zero => reset segment subclip enable bit
+	ldx #3
+	lda #clipStart
+	sta z_l
+	lda #0
+	sta temp
+ZeroCheckLoop:
+	lda temp
+	ldy #0
+	ora (z_l),y
+	iny
+	ora (z_l),y
+	sta temp
+	lda z_l
+	clc
+	adc #8
+	sta z_l
 	dex
-	bne ShiftMore
-	and flags
-	bne SkipClip
-	sty tempIndex
+	bpl ZeroCheckLoop
+
+	lda temp
+	bne ProcessSubClips
+
+	lda #segmentStart
+	sta z_l
+	ldy #SUBCLIP_ENABLE_OFFSET
+	lda #0
+	sta (z_l),y
+	jmp ProcessFromSegment
+
+ProcessSubClips:
+	ldy #3
+ProcessSubClipLoop:
+	lda #CLIP_TYPE_SUBCLIP
+	sta clipType
+	lda #subclipStart
+	sta z_l
+
 	tya
 	pha
 		jsr ProcessClip
 	pla
 	tay
 
-	jmp StoreClipFlags
-SkipClip:
-	clc
-StoreClipFlags:
-	lda flags2
-	rol
-	sta flags2
+	ldx resetFlag
+	beq ContinueSubClipLoop
 
-	ldy clipFlags
-	cpy #1
-	bne ContinueClipLoop
-
-	; clip triggered a subclip, start advancing it immediately
-	ldy tempIndex
-	lda #subclipStart
-	sta z_l
-	jsr ProcessClip
+	; advance the corresponding clip if reset flag was set
+	lda #CLIP_TYPE_CLIP
+	sta clipType
 	lda #clipStart
 	sta z_l
+	tya
+	pha
+		jsr ProcessClip
+	pla
+	tay
 
-ContinueClipLoop:
-	ldy tempIndex
+ContinueSubClipLoop:
 	dey
-	bpl ClipLoop
+	bpl ProcessSubClipLoop
 
-	ldy #0
-	; advance segment if clips did not play
-	lda flags2
-	bne ContinueTrack
-	jsr ProcessSegment
-
-ContinueTrack:
-	; if there's an active segment, don't advance
-	lda segmentStart
-	clc
-	adc segmentStart+1
-	beq NoActiveSegment
 	jmp InfLoop
-NoActiveSegment:
-	lda (trackPtr),y
-	cmp #REF_COMMAND
-	beq ProcessRef
-	cmp #END_STREAM
-	beq ResetTrack
-	jmp ResetTrack
-ProcessRef:
-	iny
-	lda (trackPtr),y
-	sta segmentStart
-	iny
-	lda (trackPtr),y
-	sta segmentStart+1
-	iny
-	lda (trackPtr),y
-	sta segmentStart+2
-	lda #0
-	sta segmentStart+3
-	incptra trackPtr,4
-	jmp InfLoop
-ResetTrack:
-	jsr ResetTrackPtr
-TrackFinished:
-	jmp InfLoop
-
-ProcessSegment:
-	lda segmentStart
-	clc
-	adc segmentStart+1
-	bne SegmentExists
-	jmp SegmentFinished
-SegmentExists:
-	lda #0
-	sta offset
-ContinueSegment:
-	ldy #0
-	lda (segmentStart),y
-	cmp #REF_COMMAND
-	beq ProcessClipRef
-	cmp #END_SEGMENT
-	beq NewSegmentItem
-	;cmp #END_STREAM
-	;beq SegmentFinished
-	jmp SegmentFinished
-NewSegmentItem:
-	incptra segmentStart,1
-	jmp ReturnFromSegment
-ProcessClipRef:
-	iny
-	lda (segmentStart),y ; addr lo
-	ldx offset
-	sta clipStart,x
-	inx
-	inx
-	sta clipStart,x ; copy at +2
-	dex
-	dex
-	iny
-	lda (segmentStart),y ; addr hi
-	inx
-	sta clipStart,x
-	inx
-	inx
-	sta clipStart,x ; copy at +2
-	iny
-	lda (segmentStart),y ; total repeats
-	inx
-	sta clipStart,x
-	lda #0 ; current repeats
-	inx
-	sta clipStart,x
-	incptra segmentStart,4
-IncreaseClipIndex:
-	lda offset
-	clc
-	adc #SIZE_OF_CLIP
-	sta offset
-	jmp ContinueSegment
-SegmentFinished:
-	lda #0
-	sta segmentStart
-	sta segmentStart+1
-ReturnFromSegment:
-	rts
 
 ; Input:
 ; - Clip pointer in z_l
 ; - Subindex (offset) in A
+; - clipType should be 0=track,1=segment,2=clip,3=subclip
 ; Post-conditions:
 ; - Clip pointer pointed by z_l is updated
-; - Carry is set if clip advanced (played something)
 ProcessClip:
 	; multiply a (=index) by SIZE_OF_CLIP to get offset
 	tax
-	clc
 	sta temp
+	pha
+		lda z_l
+		sec
+		sbc #SUBCLIP_OFFSET
+		sta temp2 ; temp2 is the subclip zero page offset
+	pla
+	clc
 
 	ldy #0
-	sty clipFlags
+	sty resetFlag
 
 	ldy #SIZE_OF_CLIP-1
 AddMore:
@@ -412,15 +339,22 @@ AddMore:
 	iny
 	lda (z_b),y
 	sta z_e
-	dey
 
-
-	; Check if current pointer is 0 => then do nothing
-	lda z_d
+	; Read subclip enable status
+	tya
 	clc
-	adc z_e
-	bne ContinueClip
-	jmp SkipRepeatCheck
+	adc #6
+	tay
+	lda (z_b),y
+
+	; if current pointer is 0 or subclip is enabled => do nothing
+	bne DontProcess
+	lda z_d
+	ora z_e
+	beq DontProcess
+	jmp ContinueClip
+DontProcess:
+	rts
 
 ContinueClip:
 	ldy #0
@@ -429,37 +363,68 @@ ContinueClip:
 	beq ProcessClipSubRef
 	cmp #INSTR_TYPE
 	beq ReadType
+	cmp #END_SEGMENT
+	beq NewSegmentItem
 	cmp #END_STREAM
-	bne PlaySound
+	beq JmpClipFinished
+	jmp PlaySound
+JmpClipFinished:
 	jmp ClipFinished
 ProcessClipSubRef:
-	ldx offset
+	lda offset
+	clc
+	adc temp2
+	tax
 	iny
 	lda (z_d),y ; addr lo
-	sta subclipStart,x
+	sta $00,x
 	inx
 	inx
-	sta subclipStart,x
+	sta $00,x
 	iny
 	lda (z_d),y ; addr hi
 	dex
-	sta subclipStart,x
+	sta $00,x
 	inx
 	inx
-	sta subclipStart,x
+	sta $00,x
 	iny
 	lda (z_d),y ; total repeats
 	inx
-	sta subclipStart,x
+	sta $00,x
 	lda #0 ; current repeats
 	inx
-	sta subclipStart,x
+	sta $00,x
+
+	; set subclip enable (2 + subclip offset)
+	txa
+	clc
+	adc #$22
+	tax
+	lda #1
+	sta $00,x
+
 	incptra z_d,4
 
-	lda #1
-	sta clipFlags
+	; for segment, increase clip index
+	lda clipType
+	cmp #CLIP_TYPE_SEGMENT
+	beq IncreaseClipIndex
+	jmp UpdatePointerAndExit
 
-	jmp SubClipFinished
+IncreaseClipIndex:
+	lda offset
+	clc
+	adc #SIZE_OF_CLIP
+	cmp #MAX_OFFSET
+	beq SetZeroIndex
+	db $2c
+SetZeroIndex:
+	lda #0
+	sta offset
+	; for segment we'll continue processing
+	jmp ContinueClip
+
 ReadType:
 	iny
 	lda (z_d),y
@@ -476,6 +441,12 @@ ReadType:
 	incptra z_d,2
 	ldy #0
 	jmp ContinueClip
+
+NewSegmentItem:
+	iny
+	incptra z_d,1
+	jmp UpdatePointerAndExit
+
 PlaySound:
 	pha
 		lda offset
@@ -502,7 +473,7 @@ triangle:
 	lda (z_d),y
 	sta APU_TRI_LEN
 	incptra z_d,3
-	jmp PlayedSomething
+	jmp UpdatePointerAndExit
 square:
 	sta APU_PULSE1_VD
 	iny
@@ -515,7 +486,7 @@ square:
 	lda (z_d),y
 	sta APU_PULSE1_LEN
 	incptra z_d,4
-	jmp PlayedSomething
+	jmp UpdatePointerAndExit
 kickdrum:
 	cmp #0
 	beq EmptyNote
@@ -529,7 +500,7 @@ kickdrum:
 	sta APU_PULSE2_LEN
 EmptyNote:
 	incptra z_d,1
-	jmp PlayedSomething
+	jmp UpdatePointerAndExit
 noise:
 	cmp #0
 	beq EmptyNoise
@@ -542,20 +513,25 @@ noise:
 	sta APU_NOISE_LEN
 EmptyNoise:
 	incptra z_d,3
-	jmp PlayedSomething
-ClipFinished:
-	sty temp2
+	jmp UpdatePointerAndExit
 
+ClipFinished:
 	; check for repeat
 	lda offset
 	clc
 	adc #REPEATS_OFFSET
 	tay
 	lda (z_b),y
+	iny
+
+	; for track, loop always
+	ldx clipType
+	cpx #CLIP_TYPE_TRACK
+	beq ResetTrackPointer
+
 	sta temp ;  total repeats
 	cmp #0
-	beq SkipRepeatCheck
-	iny
+	beq OkToClearClip
 	lda (z_b),y ; current repeats
 	; add this round
 	clc
@@ -563,7 +539,8 @@ ClipFinished:
 	sta (z_b),y ; store the new current repeats
 	cmp temp
 	beq OkToClearClip
-	; reset clip ptr
+
+ResetTrackPointer:
 	dey
 	dey
 	lda (z_b),y ; orig addr hi
@@ -576,36 +553,57 @@ ClipFinished:
 	dey ; to addr lo
 	sta (z_b),y
 
-	ldx #0
-	jmp SetPlayedFlag
+	; update current pointer position in the loop
+	ldy offset
+	lda (z_b),y
+	sta z_d
+	iny
+	lda (z_b),y
+	sta z_e
 
-SkipRepeatCheck:
-	ldx #0
-	jmp RestorePointer
+	; read more after resetting
+	ldy #0
+	jmp ContinueClip
 
 OkToClearClip:
-	ldy temp2
-
-	ldx #2
+	lda offset
+	tay
 	lda #0
+	ldx #2
+
 ClearMore:
-	sta z_d,y
+	sta (z_b),y
 	iny
 	dex
 	bne ClearMore
-	; x should be 0
-	jmp RestorePointer
-PlayedSomething:
-	ldx #1
-	; check for stream end
-	ldy #0
-	lda (z_d),y
-	cmp #END_STREAM
-	bne RestorePointer
-	jmp ClipFinished
-SubClipFinished:
-	ldx #0
-RestorePointer:
+
+	; reset parent subclip enable bit, if case of subclip or segment
+
+	lda clipType
+	cmp #CLIP_TYPE_CLIP
+	beq SkipResetSubclipFlag
+	cmp #CLIP_TYPE_TRACK
+	beq SkipResetSubclipFlag
+
+	tya
+	clc
+	adc #$25 ; 7 + subclip offset - 2
+	tay
+	lda #0
+	sta (z_b),y ; x should be 0
+
+SkipResetSubclipFlag:
+	; set flag to indicate that clip ended
+	ldy #1
+	sty resetFlag
+
+	rts
+
+UpdatePointerAndExit:
+	jsr UpdatePointer
+	rts
+
+UpdatePointer:
 	; z_de holds now the updated address
 	ldy offset
 	lda z_d
@@ -613,16 +611,6 @@ RestorePointer:
 	lda z_e
 	iny
 	sta (z_b),y
-SetPlayedFlag:
-	cpx #0
-	bne WasNotFinished
-	jmp WasFinished
-WasNotFinished:
-	sec
-	jmp ReturnFromClip
-WasFinished:
-	clc
-ReturnFromClip:
 	rts
 
 SwitchColor:
