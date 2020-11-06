@@ -138,12 +138,15 @@ def handle_item(dout, k, value, arr, i):
         else:
             dout += [hi]
         if addDelay:
-            delayTicks = 3
-            vd = get_vd(0x4, constVolFlag, haltFlag, dutyCycle)
-            lc = 0x14
-            delayMemory[get_delay_key(k, i+delayTicks)] = {
-                'type': get_track_type(k), 'vd': vd, 'lo': lo, 'hi': hi, 'lc': lc, 'swp': swp
-            }
+            for delayTicks in range(3, 5):
+                vd = get_vd(0x4 if delayTicks == 3 else 0x2,
+                            constVolFlag, haltFlag, dutyCycle)
+                lc = 0x14
+                dIndex = get_delay_key(k, i+delayTicks)
+                if not delayMemory.get(dIndex, None):
+                    delayMemory[dIndex] = {
+                        'type': get_track_type(k), 'vd': vd, 'lo': lo, 'hi': hi, 'lc': lc, 'swp': swp
+                    }
 
 
 def output_section(out, k, v, isClip=False):

@@ -222,7 +222,8 @@ ProcessFromSegment:
 	jsr ProcessClip
 
 	lda resetFlag
-	bne ProcessFromTrack
+	cmp #1
+	beq ProcessFromTrack
 
 	; Process clips
 	lda #CLIP_TYPE_CLIP
@@ -239,25 +240,7 @@ ProcessClipLoop:
 	dey
 	bpl ProcessClipLoop
 
-	; check if all clips are zero => reset segment subclip enable bit
-	ldx #3
-	lda #clipStart
-	sta z_l
-	lda #0
-	sta temp
-ZeroCheckLoop:
-	lda temp
-	ldy #0
-	ora (z_l),y
-	iny
-	ora (z_l),y
-	sta temp
-	lda z_l
-	clc
-	adc #8
-	sta z_l
-	dex
-	bpl ZeroCheckLoop
+	jsr DoZeroCheck
 
 	lda temp
 	bne ProcessSubClips
@@ -284,7 +267,8 @@ ProcessSubClipLoop:
 	tay
 
 	ldx resetFlag
-	beq ContinueSubClipLoop
+	cmp #1
+	bne ContinueSubClipLoop
 
 	; advance the corresponding clip if reset flag was set
 	lda #CLIP_TYPE_CLIP
@@ -296,6 +280,16 @@ ProcessSubClipLoop:
 		jsr ProcessClip
 	pla
 	tay
+
+	; do zero check
+	jsr DoZeroCheck
+	lda temp
+	beq ProcessFromSegment
+
+	ldx resetFlag
+	cmp #2
+	; clip activated ref, process the same index subclip once again
+	beq ProcessSubClipLoop
 
 ContinueSubClipLoop:
 	dey
@@ -364,10 +358,12 @@ ContinueClip:
 	cmp #INSTR_TYPE
 	beq ReadType
 	cmp #END_SEGMENT
-	beq NewSegmentItem
+	beq JmpNewSegmentItem
 	cmp #END_STREAM
 	beq JmpClipFinished
 	jmp PlaySound
+JmpNewSegmentItem:
+	jmp NewSegmentItem
 JmpClipFinished:
 	jmp ClipFinished
 ProcessClipSubRef:
@@ -405,6 +401,10 @@ ProcessClipSubRef:
 	sta $00,x
 
 	incptra z_d,4
+
+	; set flag to indicate that ref added
+	ldy #2
+	sty resetFlag
 
 	; for segment, increase clip index
 	lda clipType
@@ -611,6 +611,28 @@ UpdatePointer:
 	lda z_e
 	iny
 	sta (z_b),y
+	rts
+
+DoZeroCheck:
+	; check if all clips are zero => reset segment subclip enable bit
+	ldx #3
+	lda #clipStart
+	sta z_l
+	lda #0
+	sta temp
+ZeroCheckLoop:
+	lda temp
+	ldy #0
+	ora (z_l),y
+	iny
+	ora (z_l),y
+	sta temp
+	lda z_l
+	clc
+	adc #8
+	sta z_l
+	dex
+	bpl ZeroCheckLoop
 	rts
 
 SwitchColor:
