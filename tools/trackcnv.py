@@ -94,11 +94,16 @@ def get_vd(volume, constVolFlag, haltFlag, dutyCycle):
     return volume | (constVolFlag << 4) | (haltFlag << 5) | (dutyCycle << 6)
 
 
+def get_hi(tval, notelen):
+    return ((tval >> 8) & 0xff) | notelen << 3
+
+
 def handle_item(dout, k, value, arr, i):
     isTri = get_track_type(k) == TRIANGLE
     isSqu = get_track_type(k) == SQUARE
     isNoise = get_track_type(k) == NOISE
-    addDelay = ('lead' in k or 'clap' in k) and not isTri
+    isString = 'string' in k
+    addDelay = (isString or 'lead' in k or 'clap' in k) and not isTri
     if value == '.':
         dn = delayMemory.get(get_delay_key(k, i), None)
         if addDelay and dn:
@@ -117,7 +122,7 @@ def handle_item(dout, k, value, arr, i):
         tval = midi_to_tval(int(value, 10), isTri)
         lo = tval & 0xff
         notelen = 0b10000  # TODO calc proper length
-        hi = ((tval >> 8) & 0xff) | notelen << 3
+        hi = get_hi(tval, notelen)
         lc = 0
         swp = 0
         dutyCycle = 0x2
@@ -125,7 +130,12 @@ def handle_item(dout, k, value, arr, i):
         constVolFlag = 0x1
         volume = 0xf
         if isSqu:
+            if isString:
+                dutyCycle = 0x1
+                constVolFlag = 0
             vd = get_vd(volume, constVolFlag, haltFlag, dutyCycle)
+            if isString:
+                hi = get_hi(tval, 0b00001)
             dout += [vd, swp, lo, hi]
         elif isTri:
             lc = 0x7f
@@ -138,9 +148,15 @@ def handle_item(dout, k, value, arr, i):
         else:
             dout += [hi]
         if addDelay:
-            for delayTicks in range(3, 5):
-                vd = get_vd(0x4 if delayTicks == 3 else 0x2,
-                            constVolFlag, haltFlag, dutyCycle)
+            volumes = [0x6, 0x4, 0x3] if isString else [0x4, 0x2]
+            delays = [4, 8, 12] if isString else [3, 4]
+            for j, delayTicks in enumerate(delays):
+                if isString:
+                    dutyCycle += 1
+                    if dutyCycle == 4:
+                        dutyCycle = 0
+                constVolFlag = 0x1
+                vd = get_vd(volumes[j], constVolFlag, haltFlag, dutyCycle)
                 lc = 0x14
                 dIndex = get_delay_key(k, i+delayTicks)
                 if not delayMemory.get(dIndex, None):
@@ -149,8 +165,19 @@ def handle_item(dout, k, value, arr, i):
                     }
 
 
+def explode_repeats(v):
+    out = []
+    for x in v:
+        if type(x) == str and x.startswith('.*'):
+            out += (['.'] * int(x[2:], 10))
+        else:
+            out.append(x)
+    return out
+
+
 def output_section(out, k, v, isClip=False):
     out.append(f"{trackKey + k.replace('_','')}:")
+    v = explode_repeats(v)
     dout = []
     for j, value in enumerate(v):
         if type(value) == list:

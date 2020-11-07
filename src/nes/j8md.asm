@@ -415,6 +415,12 @@ ProcessClipSubRef:
 	jmp UpdatePointerAndExit
 
 IncreaseClipIndex:
+	; check if there's following data before increasing
+	ldy #0
+	lda (z_d),y
+	cmp #END_SEGMENT
+	beq SkipIncreaseIndex
+
 	lda offset
 	clc
 	adc #SIZE_OF_CLIP
@@ -424,6 +430,7 @@ IncreaseClipIndex:
 SetZeroIndex:
 	lda #0
 	sta offset
+SkipIncreaseIndex:
 	; for segment we'll continue processing
 	jmp ContinueClip
 
@@ -467,6 +474,8 @@ PlaySound:
 	beq kickdrum
 	jmp noise
 triangle:
+	cmp #0
+	beq EmptyTriangle
 	sta APU_TRI_LC
 	iny
 	lda (z_d),y
@@ -474,9 +483,12 @@ triangle:
 	iny
 	lda (z_d),y
 	sta APU_TRI_LEN
+EmptyTriangle:
 	incptra z_d,3
 	jmp UpdatePointerAndExit
 square:
+	cmp #0
+	beq EmptySquare
 	sta APU_PULSE1_VD
 	iny
 	lda (z_d),y
@@ -487,6 +499,7 @@ square:
 	iny
 	lda (z_d),y
 	sta APU_PULSE1_LEN
+EmptySquare:
 	incptra z_d,4
 	jmp UpdatePointerAndExit
 kickdrum:
