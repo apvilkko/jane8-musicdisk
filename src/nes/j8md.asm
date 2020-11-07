@@ -267,7 +267,7 @@ ProcessSubClipLoop:
 	tay
 
 	ldx resetFlag
-	cmp #1
+	cpx #1
 	bne ContinueSubClipLoop
 
 	; advance the corresponding clip if reset flag was set
@@ -275,6 +275,7 @@ ProcessSubClipLoop:
 	sta clipType
 	lda #clipStart
 	sta z_l
+
 	tya
 	pha
 		jsr ProcessClip
@@ -286,10 +287,10 @@ ProcessSubClipLoop:
 	lda temp
 	beq ProcessFromSegment
 
-	ldx resetFlag
-	cmp #2
+	;ldx resetFlag
+	;cmp #2
 	; clip activated ref, process the same index subclip once again
-	beq ProcessSubClipLoop
+	;beq ProcessSubClipLoop
 
 ContinueSubClipLoop:
 	dey
@@ -402,14 +403,15 @@ ProcessClipSubRef:
 
 	incptra z_d,4
 
-	; set flag to indicate that ref added
-	ldy #2
-	sty resetFlag
-
 	; for segment, increase clip index
 	lda clipType
 	cmp #CLIP_TYPE_SEGMENT
 	beq IncreaseClipIndex
+
+	; set flag to indicate that ref added
+	ldy #2
+	sty resetFlag
+
 	jmp UpdatePointerAndExit
 
 IncreaseClipIndex:
