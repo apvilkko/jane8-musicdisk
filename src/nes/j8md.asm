@@ -415,6 +415,9 @@ ProcessClipSubRef:
 	jmp UpdatePointerAndExit
 
 IncreaseClipIndex:
+	; update segment pointer first
+	jsr UpdatePointer
+
 	; check if there's following data before increasing
 	ldy #0
 	lda (z_d),y
@@ -452,7 +455,6 @@ ReadType:
 	jmp ContinueClip
 
 NewSegmentItem:
-	iny
 	incptra z_d,1
 	jmp UpdatePointerAndExit
 
@@ -620,6 +622,12 @@ UpdatePointerAndExit:
 
 UpdatePointer:
 	; z_de holds now the updated address
+	lda clipType
+	cmp #CLIP_TYPE_SEGMENT
+	bne UseNormalOffset
+	ldy #0 ; offset 0 for segment
+	db $2c
+UseNormalOffset:
 	ldy offset
 	lda z_d
 	sta (z_b),y

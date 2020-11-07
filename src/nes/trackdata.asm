@@ -22,5 +22,9 @@ cyintro2:
 	db $f0,<cybass1,>cybass1,$01,$f0,<cybd2,>cybd2,$01,$f0,<cystring1,>cystring1,$01,$fe,$ff
 cymel1:
 	db $f0,<cybass1,>cybass1,$01,$f0,<cybd2,>cybd2,$01,$f0,<cyclap,>cyclap,$10,$f0,<cylead1,>cylead1,$04,$fe,$ff
+cyseg1:
+	db $f0,<cybd1,>cybd1,$01,$f0,<cyclap,>cyclap,$02,$fe,$ff
+cyseg2:
+	db $f0,<cybass11,>cybass11,$01,$f0,<cybd1,>cybd1,$01,$fe,$ff
 cytrack:
 	db $f0,<cyintro,>cyintro,$01,$f0,<cyintro2,>cyintro2,$01,$f0,<cymel1,>cymel1,$01,$ff

@@ -17,6 +17,9 @@ sections:
 _intro  _bass1 _bd2
 _intro2  _bass1 _bd2 _string1
 _mel1  _bass1 _bd2 _clap*16 _lead1*4
+_seg1  _bd1 _clap*2
+_seg2  _bass11 _bd1
 
 track:
 _intro _intro2 _mel1
+;_seg2 _seg1
