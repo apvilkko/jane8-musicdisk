@@ -21,7 +21,8 @@ REF_COMMAND = $f0
 INSTR_TYPE = $fc
 TYPE_SQU = 2
 TYPE_TRI = 3
-TYPE_BD = 4
+TYPE_PERC = 4
+TYPE_SQU2 = 5
 SIZE_OF_CLIP = 8
 REPEATS_OFFSET = 4
 SUBCLIP_ENABLE_OFFSET = 7
@@ -31,6 +32,22 @@ CLIP_TYPE_TRACK = 0
 CLIP_TYPE_SEGMENT = 1
 CLIP_TYPE_CLIP = 2
 CLIP_TYPE_SUBCLIP = 3
+
+DMC_KICK1_ADDR = $f3
+
+PERC_F_KICK = %00000001
+PERC_F_CLAP = %00000010
+PERC_F_VOL = %10000000
+
+;--------------------------------------------------
+; DPCM samples
+;--------------------------------------------------
+
+	org $fcc0
+dpcmKick1:
+	incbin "dpcm/kick2.dmc"
+dpcmKick1End:
+	db $00
 
 ;--------------------------------------------------
 ; Zero page variables
@@ -48,6 +65,8 @@ temp2 = $08
 seqstep = $09
 resetFlag = $0a
 clipType = $0b
+pwm2 = $0f
+tickRef = $0e
 
 trackStart = $70
 segmentStart = trackStart - SUBCLIP_OFFSET
@@ -63,6 +82,8 @@ z_e = $05
 z_bc = z_b
 z_lh = z_l
 z_de = z_d
+
+	org $c000
 
 ;--------------------------------------------------
 ; NES registers etc.
@@ -127,6 +148,21 @@ czloop:
 	sta $00,y
 	dey
 	bne czloop
+	rts
+
+DoPwm:
+	lda pwm2
+	beq SkipPwm
+	and #%01000000
+	beq XorWithOne
+	lda #%11000000
+	db $2c
+XorWithOne:
+	lda #%01000000
+	eor pwm2
+	sta APU_PULSE2_VD
+	sta pwm2
+SkipPwm:
 	rts
 
 ;--------------------------------------------------
@@ -194,14 +230,36 @@ InfLoop:
 	;beq PlayNextItem
 
 	lda seqcount
+	; no clc!
 	adc tempo4
 	cmp vblanked
 	beq SeqTrigger
+
+	;lda vblanked
+	;lsr
+	;lsr
+	;lsr
+	;lsr
+	;lsr
+	;cmp tickRef
+	;bne SubTickProcess
+	;sta tickRef
+	;jmp InfLoop
+;SubTickProcess:
+	;sta tickRef
+	;jsr DoPwm
 
 	jmp InfLoop
 
 SeqTrigger:
 	inc seqstep
+	lda seqstep
+	and #1
+	bne PerformPwm
+	jmp SkipPerformPwm
+PerformPwm:
+	jsr DoPwm
+SkipPerformPwm:
 	lda vblanked
 	sta seqcount
 
@@ -472,8 +530,10 @@ PlaySound:
 	beq triangle
 	cpx #TYPE_SQU
 	beq square
-	cpx #TYPE_BD
-	beq kickdrum
+	cpx #TYPE_SQU2
+	beq square2
+	cpx #TYPE_PERC
+	beq perc
 	jmp noise
 triangle:
 	cmp #0
@@ -501,20 +561,70 @@ square:
 	iny
 	lda (z_d),y
 	sta APU_PULSE1_LEN
+	jmp EmptySquare
+square2:
+	cmp #0
+	beq EmptySquare
+	sta APU_PULSE2_VD
+	sta pwm2
+	iny
+	lda (z_d),y
+	sta APU_PULSE2_SWP
+	iny
+	lda (z_d),y
+	sta APU_PULSE2_FRQ
+	iny
+	lda (z_d),y
+	sta APU_PULSE2_LEN
 EmptySquare:
 	incptra z_d,4
 	jmp UpdatePointerAndExit
-kickdrum:
+perc:
 	cmp #0
 	beq EmptyNote
-	lda #%10011111
-	sta APU_PULSE2_VD
-	lda #%10000010
-	sta APU_PULSE2_SWP
-	lda #%11111111
-	sta APU_PULSE2_FRQ
-	lda #%11111000
-	sta APU_PULSE2_LEN
+
+	tax
+	and #PERC_F_KICK
+	beq PlayClap
+PlayKick:
+
+	lda #$0f
+	sta APU_DMC_FR
+	lda #DMC_KICK1_ADDR
+	sta APU_DMC_ADDR
+	; 528 - 1 / 16
+	lda #32
+	sta APU_DMC_LEN
+
+	; trigger dmc with enable bit
+	lda #%00011111
+	sta APU_CTL_STATUS
+
+	txa
+	and #PERC_F_CLAP
+	beq EmptyNote
+PlayClap:
+	txa
+	and #PERC_F_VOL
+	beq NormalVolume
+	lda #$16
+	db $2c
+NormalVolume:
+	lda #$1f
+	sta APU_NOISE_VD
+	lda #2
+	sta APU_NOISE_FRQ
+	lda #0
+	sta APU_NOISE_LEN
+
+	;lda #%10011111
+	;sta APU_PULSE2_VD
+	;lda #%10000010
+	;sta APU_PULSE2_SWP
+	;lda #%11111111
+	;sta APU_PULSE2_FRQ
+	;lda #%11111000
+	;sta APU_PULSE2_LEN
 EmptyNote:
 	incptra z_d,1
 	jmp UpdatePointerAndExit

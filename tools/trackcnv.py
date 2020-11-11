@@ -64,9 +64,10 @@ TRACK_TYPE = 0xfc
 NOISE = 0x1
 SQUARE = 0x2
 TRIANGLE = 0x3
-BD = 0x4
+PERC = 0x4
+SQUARE_2 = 0x5
 
-DATA_LENS = [0, 3, 4, 3, 1]
+DATA_LENS = [0, 3, 4, 3, 1, 4]
 
 
 def to_hex(x):
@@ -77,9 +78,11 @@ def get_track_type(s):
     if 'bass' in s:
         return TRIANGLE
     elif 'bd' in s:
-        return BD
+        return PERC
     elif 'clap' in s:
-        return NOISE
+        return PERC
+    elif 'string' in s:
+        return SQUARE_2
     return SQUARE
 
 
@@ -100,14 +103,14 @@ def get_hi(tval, notelen):
 
 def handle_item(dout, k, value, arr, i):
     isTri = get_track_type(k) == TRIANGLE
-    isSqu = get_track_type(k) == SQUARE
+    isSqu = get_track_type(k) == SQUARE or get_track_type(k) == SQUARE_2
     isNoise = get_track_type(k) == NOISE
     isString = 'string' in k
-    addDelay = (isString or 'lead' in k or 'clap' in k) and not isTri
+    addDelay = (isString or 'lead' in k) and not isTri
     if value == '.':
         dn = delayMemory.get(get_delay_key(k, i), None)
         if addDelay and dn:
-            if dn['type'] == SQUARE:
+            if dn['type'] == SQUARE or dn['type'] == SQUARE_2:
                 dout += [dn['vd'], dn['swp'], dn['lo'], dn['hi']]
             else:
                 dout += [dn['lc'], dn['lo'], dn['hi']]
@@ -119,7 +122,11 @@ def handle_item(dout, k, value, arr, i):
         times = 1 if len(parts) == 1 else int(parts[1], 10)
         dout += [REF_CODE, f'<{ref}', f'>{ref}', times]
     else:
-        tval = midi_to_tval(int(value, 10), isTri)
+        tval = 0
+        try:
+            tval = midi_to_tval(int(value, 10), isTri)
+        except ValueError:
+            print('skipping ' + value)
         lo = tval & 0xff
         notelen = 0b10000  # TODO calc proper length
         hi = get_hi(tval, notelen)
@@ -145,16 +152,21 @@ def handle_item(dout, k, value, arr, i):
             lo = 0x5
             hi = 0
             dout += [lc, lo, hi]
-        else:
+        else:  # PERC
+            hi = 0
+            if 's' in value:
+                hi = 0b10000000
+                value = value[:-1]
+            hi = hi | int(value, 10)
             dout += [hi]
         if addDelay:
             volumes = [0x6, 0x4, 0x3] if isString else [0x4, 0x2]
             delays = [4, 8, 12] if isString else [3, 4]
             for j, delayTicks in enumerate(delays):
-                if isString:
-                    dutyCycle += 1
-                    if dutyCycle == 4:
-                        dutyCycle = 0
+                # if isString:
+                #    dutyCycle += 1
+                #    if dutyCycle == 4:
+                #        dutyCycle = 0
                 constVolFlag = 0x1
                 vd = get_vd(volumes[j], constVolFlag, haltFlag, dutyCycle)
                 lc = 0x14
