@@ -78,9 +78,7 @@ def to_hex(x):
 def get_track_type(s):
     if 'bass' in s:
         return TRIANGLE
-    elif 'bd' in s:
-        return PERC
-    elif 'clap' in s:
+    elif 'bd' in s or 'dr' in s or 'clap' in s:
         return PERC
     elif 'string' in s:
         return SQUARE_2

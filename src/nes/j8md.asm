@@ -349,15 +349,15 @@ ProcessSubClipLoop:
 	pla
 	tay
 
+	ldx resetFlag
+	cpx #2
+	beq ProcessSubClipLoop
+	; clip activated ref, process the same index subclip once again
+
 	; do zero check
 	jsr DoZeroCheck
 	lda temp
 	beq ProcessFromSegment
-
-	;ldx resetFlag
-	;cmp #2
-	; clip activated ref, process the same index subclip once again
-	;beq ProcessSubClipLoop
 
 ContinueSubClipLoop:
 	dey
