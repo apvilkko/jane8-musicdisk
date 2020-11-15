@@ -65,8 +65,9 @@ temp2 = $08
 seqstep = $09
 resetFlag = $0a
 clipType = $0b
-pwm2 = $0f
 tickRef = $0e
+pwm2 = $0f
+frq2 = $0d
 
 trackStart = $70
 segmentStart = trackStart - SUBCLIP_OFFSET
@@ -165,6 +166,15 @@ XorWithOne:
 SkipPwm:
 	rts
 
+DoVibrato:
+	lda frq2
+	beq SkipVibrato
+	eor #%00000010
+	sta APU_PULSE2_FRQ
+	sta frq2
+SkipVibrato:
+	rts
+
 ;--------------------------------------------------
 ; Program start
 ;--------------------------------------------------
@@ -200,8 +210,9 @@ Wait2:
 
 	lda #$00
 	sta counter
-	sta seqcount
+	lda #$ff
 	sta seqstep
+	sta seqcount
 
 	lda #%00001111
 	sta APU_CTL_STATUS
@@ -235,19 +246,17 @@ InfLoop:
 	cmp vblanked
 	beq SeqTrigger
 
-	;lda vblanked
-	;lsr
-	;lsr
-	;lsr
-	;lsr
-	;lsr
-	;cmp tickRef
-	;bne SubTickProcess
-	;sta tickRef
-	;jmp InfLoop
-;SubTickProcess:
-	;sta tickRef
-	;jsr DoPwm
+	lda vblanked
+	lsr
+	lsr
+	lsr
+	cmp tickRef
+	bne SubTickProcess
+	sta tickRef
+	jmp InfLoop
+SubTickProcess:
+	sta tickRef
+	jsr DoVibrato
 
 	jmp InfLoop
 
@@ -255,7 +264,7 @@ SeqTrigger:
 	inc seqstep
 	lda seqstep
 	and #1
-	bne PerformPwm
+	beq PerformPwm
 	jmp SkipPerformPwm
 PerformPwm:
 	jsr DoPwm
@@ -523,7 +532,31 @@ PlaySound:
 		adc #6
 		tay
 		lda (z_b),y ; read clip instrument
+		and #%00000111 ; bottom 3 bits are instrument type
 		tax
+		lda (z_b),y
+		and #%11111000 ; top 5 bits are tempo divisor
+		lsr
+		lsr
+		lsr
+		tay
+		lda seqstep
+		cpy #1
+		beq FullNote
+		cpy #4
+		beq Quarter
+		jmp Play16
+Quarter:
+		and #%00000011 ; modulo 4
+		beq Play16
+		pla
+		jmp ExitWithoutUpdating
+FullNote:
+		and #%00001111 ; modulo 16
+		beq Play16
+		pla
+		jmp ExitWithoutUpdating
+Play16:
 	pla
 	ldy #0
 	cpx #TYPE_TRI
@@ -573,6 +606,7 @@ square2:
 	iny
 	lda (z_d),y
 	sta APU_PULSE2_FRQ
+	sta frq2
 	iny
 	lda (z_d),y
 	sta APU_PULSE2_LEN
@@ -728,6 +762,7 @@ SkipResetSubclipFlag:
 
 UpdatePointerAndExit:
 	jsr UpdatePointer
+ExitWithoutUpdating:
 	rts
 
 UpdatePointer:
