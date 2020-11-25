@@ -49,5 +49,3 @@ _emph2  _basse2 _string3 _drfull _lead3
 track:
 ; full track
 _intro _intro2 _mel1 _mel1hh _break1 _break1bd _break1bdf _mel1ho _emph1 _emph2*2
-
-;_emph2

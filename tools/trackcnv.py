@@ -108,6 +108,7 @@ def get_divisor(k):
     return (k,divisor)
 
 volumeScale = 1.0
+latest = {}
 
 def handle_item(dout, k, value, arr, i):
     global volumeScale
@@ -121,7 +122,7 @@ def handle_item(dout, k, value, arr, i):
         return
     if value == '.':
         dn = delayMemory.get(get_delay_key(k, i), None)
-        if addDelay and dn:
+        if addDelay and dn and ((isString and dn['note'] == latest[k]) or (not isString)):
             if dn['type'] == SQUARE or dn['type'] == SQUARE_2:
                 dout += [dn['vd'], dn['swp'], dn['lo'], dn['hi']]
             else:
@@ -135,8 +136,11 @@ def handle_item(dout, k, value, arr, i):
         dout += [REF_CODE, f'<{ref}', f'>{ref}', times]
     else:
         tval = 0
+        intValue = 0
         try:
-            tval = midi_to_tval(int(value, 10), isTri)
+            intValue = int(value, 10)
+            tval = midi_to_tval(intValue, isTri)
+            latest[k] = intValue
         except ValueError:
             print('skipping ' + value)
         lo = tval & 0xff
@@ -187,7 +191,13 @@ def handle_item(dout, k, value, arr, i):
                 dIndex = get_delay_key(k, i+delayTicks)
                 if not delayMemory.get(dIndex, None):
                     delayMemory[dIndex] = {
-                        'type': get_track_type(k), 'vd': vd, 'lo': lo, 'hi': hi, 'lc': lc, 'swp': swp
+                        'type': get_track_type(k),
+                        'vd': vd,
+                        'lo': lo,
+                        'hi': hi,
+                        'lc': lc,
+                        'swp': swp,
+                        'note': intValue
                     }
 
 
