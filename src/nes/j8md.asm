@@ -19,6 +19,7 @@ END_STREAM = $ff
 END_SEGMENT = $fe
 REF_COMMAND = $f0
 INSTR_TYPE = $fc
+TEMPO_COMMAND = $fb
 TYPE_SQU = 2
 TYPE_TRI = 3
 TYPE_PERC = 4
@@ -219,16 +220,6 @@ Wait2:
 
 	jsr ResetTrackPtr
 
-	; TODO read tempo
-	lda #34
-	sta tempo
-
-	; Trigger by 16th note.
-	; Dividing tempo on integer logic results in approximate higher tempos (>120 bpm).
-	lsr ; divide by 4
-	lsr
-	sta tempo4
-
 InfLoop:
 	;jsr ReadJoy
 
@@ -424,16 +415,31 @@ ContinueClip:
 	cmp #REF_COMMAND
 	beq ProcessClipSubRef
 	cmp #INSTR_TYPE
-	beq ReadType
+	beq JmpReadType
 	cmp #END_SEGMENT
 	beq JmpNewSegmentItem
 	cmp #END_STREAM
 	beq JmpClipFinished
+	cmp #TEMPO_COMMAND
+	beq StoreTempo
 	jmp PlaySound
+JmpReadType:
+	jmp ReadType
 JmpNewSegmentItem:
 	jmp NewSegmentItem
 JmpClipFinished:
 	jmp ClipFinished
+StoreTempo:
+	iny
+	lda (z_d),y
+	sta tempo
+	; Trigger by 16th note.
+	; Dividing tempo on integer logic results in approximate higher tempos (>120 bpm).
+	lsr ; divide by 4
+	lsr
+	sta tempo4
+	incptra z_d,2
+	jmp ContinueClip
 ProcessClipSubRef:
 	lda offset
 	clc

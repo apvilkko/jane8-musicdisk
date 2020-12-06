@@ -61,6 +61,7 @@ REF_CODE = 0xf0
 END_CODE = 0xff
 SECTION_SPLIT = 0xfe
 TRACK_TYPE = 0xfc
+TEMPO_COMMAND = 0xfb
 
 NOISE = 0x1
 SQUARE = 0x2
@@ -211,12 +212,14 @@ def explode_repeats(v):
     return out
 
 
-def output_section(out, k, v, isClip=False):
+def output_section(out, k, v, isClip=False, prefixData=None):
     global volumeScale
     (cleanKey, _) = get_divisor(k)
     out.append(f"{trackKey + cleanKey.replace('_','')}:")
     v = explode_repeats(v)
     dout = []
+    if prefixData:
+        dout += prefixData
     volumeScale = 1.0
     for j, value in enumerate(v):
         if type(value) == list:
@@ -233,10 +236,10 @@ def output_section(out, k, v, isClip=False):
     out.append(f"\tdb {','.join([to_hex(x) for x in dout])}")
 
 
+TEMPO_COEFF_NTSC = 0.28
+
 def output_nes(data):
     out = []
-    out.append(
-        f"{trackKey + 'tempo'}:\n\tdb ${int(data['meta']['_tempo'][0], 10):02x}")
 
     for k, v in data['clips'].items():
         output_section(out, k, v, True)
@@ -244,7 +247,8 @@ def output_nes(data):
     for k, v in data['sections'].items():
         output_section(out, k, v)
     for v in data['track']:
-        output_section(out, 'track', v)
+        output_section(out, 'track', v, False,
+        [f"${TEMPO_COMMAND:02x}", f"${round(int(data['meta']['_tempo'][0], 10)*TEMPO_COEFF_NTSC):02x}"])
 
     with open(outfile, 'w') as f:
         f.writelines([x + '\n' for x in out])

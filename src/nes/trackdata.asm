@@ -1,5 +1,3 @@
-cytempo:
-	db $69
 cybass11:
 	db $fc,$83,$7f,$bf,$83,$7f,$df,$81,$7f,$bf,$83,$7f,$bf,$83,$7f,$bf,$83,$7f,$df,$81,$7f,$bf,$83,$7f,$bf,$83,$7f,$df,$81,$7f,$bf,$83,$7f,$df,$81,$7f,$bf,$83,$7f,$df,$81,$7f,$df,$81,$7f,$bf,$83,$7f,$ef,$80,$ff
 cybass12:
@@ -81,4 +79,4 @@ cyemph1:
 cyemph2:
 	db $f0,<cybasse2,>cybasse2,$01,$f0,<cystring3,>cystring3,$01,$f0,<cydrfull,>cydrfull,$01,$f0,<cylead3,>cylead3,$01,$fe,$ff
 cytrack:
-	db $f0,<cyintro,>cyintro,$01,$f0,<cyintro2,>cyintro2,$01,$f0,<cymel1,>cymel1,$01,$f0,<cymel1hh,>cymel1hh,$01,$f0,<cybreak1,>cybreak1,$01,$f0,<cybreak1bd,>cybreak1bd,$01,$f0,<cybreak1bdf,>cybreak1bdf,$01,$f0,<cymel1ho,>cymel1ho,$01,$f0,<cyemph1,>cyemph1,$01,$f0,<cyemph2,>cyemph2,$02,$ff
+	db $fb,$1d,$f0,<cyintro,>cyintro,$01,$f0,<cyintro2,>cyintro2,$01,$f0,<cymel1,>cymel1,$01,$f0,<cymel1hh,>cymel1hh,$01,$f0,<cybreak1,>cybreak1,$01,$f0,<cybreak1bd,>cybreak1bd,$01,$f0,<cybreak1bdf,>cybreak1bdf,$01,$f0,<cymel1ho,>cymel1ho,$01,$f0,<cyemph1,>cyemph1,$01,$f0,<cyemph2,>cyemph2,$02,$ff
