@@ -34,10 +34,10 @@ CLIP_TYPE_SEGMENT = 1
 CLIP_TYPE_CLIP = 2
 CLIP_TYPE_SUBCLIP = 3
 
-DMC_KICK1_ADDR = $f3
-
 PERC_F_KICK = %00000001
 PERC_F_CLAP = %00000010
+PERC_F_HH = %00000100
+PERC_F_HO = %00001000
 PERC_F_VOL = %10000000
 
 ;--------------------------------------------------
@@ -46,9 +46,22 @@ PERC_F_VOL = %10000000
 
 	org $fcc0
 dpcmKick1:
-	incbin "dpcm/kick2.dmc"
+	incbin "dpcm/kick3.dmc"
 dpcmKick1End:
 	db $00
+
+	org $fec0
+dpcmHh1:
+	incbin "dpcm/hh1.dmc"
+dpcmHh1End:
+	db $00
+
+; Sample address = %11AAAAAA.AA000000 = $C000 + (A * 64)
+DMC_KICK1_ADDR = $f3 ; $fcc0
+DMC_HH1_ADDR = $fb ; $fec0
+
+Kick1Size = dpcmKick1End - dpcmKick1 - 1
+Hh1Size = dpcmHh1End - dpcmHh1 - 1
 
 ;--------------------------------------------------
 ; Zero page variables
@@ -139,8 +152,8 @@ IrqHandler:
 ;--------------------------------------------------
 
 ResetTrackPtr:
-	store16 cytrack,trackStart
-	store16 cytrack,trackStart+2
+	store16 sutrack,trackStart
+	store16 sutrack,trackStart+2
 	rts
 
 ClearZeroPage:
@@ -625,24 +638,40 @@ perc:
 
 	tax
 	and #PERC_F_KICK
-	beq PlayClap
+	beq SkipKick
 PlayKick:
-
 	lda #$0f
 	sta APU_DMC_FR
+
+	; Sample address = %11AAAAAA.AA000000 = $C000 + (A * 64)
 	lda #DMC_KICK1_ADDR
 	sta APU_DMC_ADDR
-	; 528 - 1 / 16
-	lda #32
+
+	; DMC LEN should be (sampleLen - 1) / 16
+	; hHlL => Hl
+	; optimize later: this calculation could be done only once per sample
+	lda #<Kick1Size
+	lsr
+	lsr
+	lsr
+	lsr
+	sta temp
+	lda #>Kick1Size
+	asl
+	asl
+	asl
+	asl
+	ora temp
 	sta APU_DMC_LEN
 
 	; trigger dmc with enable bit
 	lda #%00011111
 	sta APU_CTL_STATUS
 
+SkipKick:
 	txa
 	and #PERC_F_CLAP
-	beq EmptyNote
+	beq SkipClap
 PlayClap:
 	txa
 	and #PERC_F_VOL
@@ -665,6 +694,50 @@ NormalVolume:
 	;sta APU_PULSE2_FRQ
 	;lda #%11111000
 	;sta APU_PULSE2_LEN
+SkipClap:
+	txa
+	and #PERC_F_HH
+	beq SkipHh
+PlayHh:
+	lda #$0f
+	sta APU_DMC_FR
+
+	; Sample address = %11AAAAAA.AA000000 = $C000 + (A * 64)
+	lda #DMC_HH1_ADDR
+	sta APU_DMC_ADDR
+
+	; DMC LEN should be (sampleLen - 1) / 16
+	; hHlL => Hl
+	; optimize later: this calculation could be done only once per sample
+	lda #<Hh1Size
+	lsr
+	lsr
+	lsr
+	lsr
+	sta temp
+	lda #>Hh1Size
+	asl
+	asl
+	asl
+	asl
+	ora temp
+	sta APU_DMC_LEN
+
+	; trigger dmc with enable bit
+	lda #%00011111
+	sta APU_CTL_STATUS
+SkipHh:
+	txa
+	and #PERC_F_HO
+	beq SkipHo
+PlayHo:
+	lda #$1c
+	sta APU_NOISE_VD
+	lda #2
+	sta APU_NOISE_FRQ
+	lda #0
+	sta APU_NOISE_LEN
+SkipHo:
 EmptyNote:
 	incptra z_d,1
 	jmp UpdatePointerAndExit

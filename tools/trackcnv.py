@@ -5,39 +5,53 @@ import math
 infile = sys.argv[1]
 platform = sys.argv[2]
 outfile = sys.argv[3]
-data = {}
-trackKey = os.path.split(infile)[-1][:2]
+trackKey = ""
 
+def get_inputs(infile):
+    if os.path.isfile(infile):
+        return [infile]
+    return [os.path.join(infile, x) for x in os.listdir(infile)]
+
+delayMemory = {}
 
 def main():
-    with open(infile, 'r') as f:
-        lines = [x.strip() for x in f.readlines()]
+    global trackKey
+    global delayMemory
+    with open(outfile, 'w') as out:
+        inputs = get_inputs(infile)
+        for inputfile in inputs:
+            data = {}
+            delayMemory = {}
+            trackKey = os.path.split(inputfile)[-1][:2]
+            print(f"reading {inputfile}")
+            with open(inputfile, 'r') as f:
+                lines = [x.strip() for x in f.readlines()]
 
-    section = None
-    for line in lines:
-        line = line.strip()
-        if not len(line) or line.startswith(';'):
-            continue
-        if ':' in line:
-            section = line.replace(':', '').strip()
-            continue
-        isSection = section == 'sections'
-        isDef = section != 'track'
-        if line.startswith('_'):
-            parts = [x for x in line.split(' ') if len(x)]
-            if not data.get(section, None):
-                data[section] = {} if isDef else []
-            if isDef:
-                payload = parts[1:]
-                if isSection:
-                    payload = ' '.join(parts[1:]).split(',')
-                    payload = [x.split(' ') for x in payload]
-                data[section][parts[0]] = payload
-            else:
-                data[section].append(parts)
+            section = None
+            for line in lines:
+                line = line.strip()
+                if not len(line) or line.startswith(';'):
+                    continue
+                if ':' in line:
+                    section = line.replace(':', '').strip()
+                    continue
+                isSection = section == 'sections'
+                isDef = section != 'track'
+                if line.startswith('_'):
+                    parts = [x for x in line.split(' ') if len(x)]
+                    if not data.get(section, None):
+                        data[section] = {} if isDef else []
+                    if isDef:
+                        payload = parts[1:]
+                        if isSection:
+                            payload = ' '.join(parts[1:]).split(',')
+                            payload = [x.split(' ') for x in payload]
+                        data[section][parts[0]] = payload
+                    else:
+                        data[section].append(parts)
 
-    if platform == 'nes':
-        output_nes(data)
+            if platform == 'nes':
+                output_nes(data, out)
 
 
 NES_CPU_CLK = {
@@ -86,9 +100,6 @@ def get_track_type(s):
     return SQUARE
 
 
-delayMemory = {}
-
-
 def get_delay_key(k, i):
     return f'{k}{i}'
 
@@ -113,6 +124,7 @@ latest = {}
 
 def handle_item(dout, k, value, arr, i):
     global volumeScale
+    global delayMemory
     isTri = get_track_type(k) == TRIANGLE
     isSqu = get_track_type(k) == SQUARE or get_track_type(k) == SQUARE_2
     isNoise = get_track_type(k) == NOISE
@@ -236,9 +248,9 @@ def output_section(out, k, v, isClip=False, prefixData=None):
     out.append(f"\tdb {','.join([to_hex(x) for x in dout])}")
 
 
-TEMPO_COEFF_NTSC = 0.28
+TEMPO_COEFF_NTSC = 3200
 
-def output_nes(data):
+def output_nes(data, f):
     out = []
 
     for k, v in data['clips'].items():
@@ -248,10 +260,9 @@ def output_nes(data):
         output_section(out, k, v)
     for v in data['track']:
         output_section(out, 'track', v, False,
-        [f"${TEMPO_COMMAND:02x}", f"${round(int(data['meta']['_tempo'][0], 10)*TEMPO_COEFF_NTSC):02x}"])
+        [f"${TEMPO_COMMAND:02x}", f"${round(1/int(data['meta']['_tempo'][0], 10)*TEMPO_COEFF_NTSC):02x}"])
 
-    with open(outfile, 'w') as f:
-        f.writelines([x + '\n' for x in out])
+    f.writelines([x + '\n' for x in out])
 
 
 if __name__ == "__main__":
