@@ -1,8 +1,13 @@
 import sys
 import pprint
+import os.path
 from struct import unpack
 
 infilename = sys.argv[1]
+outfilename = sys.argv[2] if len(sys.argv) > 2 else None
+
+BASS = 2
+LEAD = 4
 
 def ntstr(b):
     return b.decode('ascii').rstrip('\0')
@@ -29,7 +34,7 @@ def read_patterns(out, data):
         notes = []
         row = 0
 
-        print(list(data[pos:pos+32]))
+        #print(list(data[pos:pos+32]))
 
         while True:
             channelvariable = data[pos]
@@ -68,9 +73,53 @@ def read_patterns(out, data):
                 notes.append(note)
             pos = pos + 1
         pattern['notes'] = notes
-        pprint.pprint(pattern)
+        #pprint.pprint(pattern)
         ret.append(pattern)
     return ret
+
+CHANNELS = 3
+REST = 0b10000000
+SAME = 0b01000000
+
+def to_pitch(note, ins):
+    if ins == BASS:
+        return note - 12*3
+    elif ins == LEAD:
+        return note - 12
+    return note
+
+def write_bin(song, filename):
+    out = []
+    mem = {0: {}, 1:{},2:{},3:{}}
+    for pattern in song['patterns']:
+        #print("pattern", pattern)
+        for i in range(0, pattern['rows']):
+            items = list(filter(lambda x: x['row']==i, pattern['notes']))
+            #print("row", i, items)
+            for i in range(0, CHANNELS):
+                item = items[i] if len(items) > i else None
+                if item is None:
+                    out.append(REST)
+                else:
+                    memIns = mem[item['channel']]['ins'] if 'ins' in mem[item['channel']] else None
+                    memNote = mem[item['channel']]['note'] if 'note' in mem[item['channel']] else None
+                    ins = item['ins'] if 'ins' in item else memIns
+                    note = item['note'] if 'note' in item else memNote
+                    if ins == memIns and note == memNote:
+                        out.append(SAME)
+                    else:
+                        mem[item['channel']]['ins'] = ins
+                        mem[item['channel']]['note'] = note
+                        byte1 = to_pitch(note, ins)
+                        # TODO support effect
+                        byte2 = ins
+                        out.append(byte1)
+                        out.append(byte2)
+    (root, ext) = os.path.splitext(filename)
+    outfile = outfilename if outfilename else os.path.split(root)[1] + '.bin'
+    with open(outfile, 'wb') as f:
+        f.write(bytes(out))
+    print("Wrote " + outfile)
 
 def main():
     with open(infilename, 'rb') as f:
@@ -107,6 +156,8 @@ def main():
         out['pat_offsets'] = long_arr(data, pat_offset, out['pat_num'])
         out['patterns'] = read_patterns(out, data)
         #print(out)
+
+    write_bin(out, infilename)
 
 
 if __name__ == "__main__":
