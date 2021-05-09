@@ -6,8 +6,28 @@ from struct import unpack
 infilename = sys.argv[1]
 outfilename = sys.argv[2] if len(sys.argv) > 2 else None
 
+KICK = 1
 BASS = 2
+LONG_LEAD = 3
 LEAD = 4
+CLAP = 5
+HHC = 6
+HHO = 7
+
+NOISE =    0b10000000
+PULSE =    0b01000000
+SAWTOOTH = 0b00100000
+TRIANGLE = 0b00010000
+
+INSTRUMENTS = [
+    [KICK, {'osc': NOISE}],
+    [BASS, {'osc': SAWTOOTH}],
+    [LONG_LEAD, {'osc': PULSE}],
+    [LEAD, {'osc': PULSE}],
+    [CLAP, {'osc': NOISE}],
+    [HHC, {'osc': TRIANGLE}],
+    [HHO, {'osc': TRIANGLE}],
+]
 
 def ntstr(b):
     return b.decode('ascii').rstrip('\0')
@@ -24,13 +44,13 @@ def long_arr(b, offset, length):
 
 def read_patterns(out, data):
     ret = []
+    channel_data = {}
     for i in range(out['pat_num']):
         pos = out['pat_offsets'][i]
         pattern = {}
         pattern['length'] = short(data, pos)
         pattern['rows'] = short(data, pos + 2)
         pos = pos + 8
-        channel_data = {}
         notes = []
         row = 0
 
@@ -55,14 +75,17 @@ def read_patterns(out, data):
                 # read note
                 pos = pos + 1
                 note['note'] = data[pos]
+                channel_data[channel]['note'] = note['note']
             if maskvariable & 2:
                 # read instrument
                 pos = pos + 1
                 note['ins'] = data[pos]
+                channel_data[channel]['ins'] = note['ins']
             if maskvariable & 4:
                 # read vol/pan
                 pos = pos + 1
                 note['vol_pan'] = data[pos]
+                channel_data[channel]['vol_pan'] = note['vol_pan']
             if maskvariable & 8:
                 # read command & commandvalue
                 pos = pos + 1
@@ -70,7 +93,15 @@ def read_patterns(out, data):
                 pos = pos + 1
                 note['command_value'] = data[pos]
             if note['channel'] < 63:
-                notes.append(note)
+                if not 'note' in note:
+                    note['note'] = channel_data[channel]['note']
+                if not 'ins' in note:
+                    note['ins'] = channel_data[channel]['ins']
+                if not 'vol_pan' in note and 'vol_pan' in channel_data[channel]:
+                    note['vol_pan'] = channel_data[channel]['vol_pan']
+                # filter small volumes
+                if not 'vol_pan' in note or note['vol_pan'] > 63:
+                    notes.append(note)
             pos = pos + 1
         pattern['notes'] = notes
         #pprint.pprint(pattern)
@@ -85,16 +116,39 @@ def to_pitch(note, ins):
     if ins == BASS:
         return note - 12*3
     elif ins == LEAD:
+        return note - 12*2
+    elif ins == LONG_LEAD:
         return note - 12
     return note
+
+# Instrument priority
+def sorter(item):
+    if item['ins'] == CLAP:
+        return 0
+    if item['ins'] == LEAD:
+        return 1
+    if item['ins'] == LONG_LEAD:
+        return 2
+    if item['ins'] == KICK:
+        return 3
+    #if item['ins'] == BASS:
+    #    return 4
+    return 100
+
 
 def write_bin(song, filename):
     out = []
     mem = {0: {}, 1:{},2:{},3:{}}
-    for pattern in song['patterns']:
+    count = 0
+    for order in song['orders']:
+        if order == 255:
+            break
+        pattern = song['patterns'][order]
+        #if count < 8:
+        #    continue
         #print("pattern", pattern)
         for i in range(0, pattern['rows']):
-            items = list(filter(lambda x: x['row']==i, pattern['notes']))
+            items = sorted(list(filter(lambda x: x['row']==i, pattern['notes'])), key=sorter)
             #print("row", i, items)
             for i in range(0, CHANNELS):
                 item = items[i] if len(items) > i else None
@@ -115,8 +169,29 @@ def write_bin(song, filename):
                         byte2 = ins
                         out.append(byte1)
                         out.append(byte2)
+        count += 1
     (root, ext) = os.path.splitext(filename)
     outfile = outfilename if outfilename else os.path.split(root)[1] + '.bin'
+    with open(outfile, 'wb') as f:
+        #print(out)
+        f.write(bytes(out))
+    print("Wrote " + outfile)
+
+def write_instruments(song, filename):
+    (root, ext) = os.path.splitext(outfilename if outfilename else filename)
+    outfile = root + '.inst.bin'
+    out = []
+    for ins in INSTRUMENTS:
+        data = ins[1]
+        byte1 = data['osc']
+        byte2 = 0
+        byte3 = 0
+        byte4 = 0
+        out.append(byte1)
+        out.append(byte2)
+        out.append(byte3)
+        out.append(byte4)
+
     with open(outfile, 'wb') as f:
         f.write(bytes(out))
     print("Wrote " + outfile)
@@ -158,6 +233,7 @@ def main():
         #print(out)
 
     write_bin(out, infilename)
+    write_instruments(out, infilename)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ dataPosLo = $04
 dataPosHi = $05
 offset = $06
 temp = $07
+inst = $08
+ctl = $09
 noteCache = $f7
 
 	macro print,val,pos
@@ -53,6 +55,22 @@ noteCache = $f7
 		bne \2
 		inc \1+1
 	    \2:
+	endmacro
+
+	macro pushall
+		pha
+		txa
+		pha
+		tya
+		pha
+	endmacro
+
+	macro pullall
+		pla
+		tay
+		pla
+		tax
+		pla
 	endmacro
 
 ;================================
@@ -168,6 +186,7 @@ readCached:
 	sta temp
 	jsr SetPitch
 	lda noteCache+1,y
+	sta inst
 	jsr SetInstrument
 	jmp playNote
 
@@ -183,7 +202,7 @@ readNote:
 	lda (dataPosLo),y
 	ldy offset
 	sta noteCache+1,y
-
+	sta inst
 	jsr SetInstrument
 
 playNote:
@@ -192,6 +211,12 @@ playNote:
 	ldy offset
 	sta SID_V1_CTL,y
 
+	; set pulse width
+	lda #$00
+	sta SID_V1_PW_1,y
+	lda #$04
+	sta SID_V1_PW_2,y
+
 	; play note
 	lda #$06
   	sta SID_V1_AD,y
@@ -199,7 +224,8 @@ playNote:
 	lda #$00
   	sta SID_V1_SR,y
 
-	lda #%00100001
+	lda ctl
+	ora #1
   	sta SID_V1_CTL,y
 
 skipItem:
@@ -217,22 +243,46 @@ ExitSoundDriver:
 	rts
 
 SetPitch:
-	ldy temp
-	lda PitchTableLo,y
+	pushall
+	ldx temp
 	ldy offset
+	lda PitchTableLo,x
 	sta SID_V1_FREQ_1,y
-	ldy temp
-	lda PitchTableHi,y
-	ldy offset
-  	sta SID_V1_FREQ_2,y
+	lda PitchTableHi,x
+	sta SID_V1_FREQ_2,y
+	pullall
 	rts
 
+; input:
+; - inst is instrument ref (1 based)
+; - offset is current SID regs offset
 SetInstrument:
-	nop
+	pushall
+	; instrument index to zero-based and aligned to instrument data (4 bytes)
+	dec inst
+	asl inst
+	asl inst
+	ldx inst
+
+	; set osc
+	lda InstDataStart,x
+	sta ctl
+
+	inx
+	lda InstDataStart,x
+	inx
+	lda InstDataStart,x
+	inx
+	lda InstDataStart,x
+	pullall
 	rts
 
 MusicDataStart:
 	incbin "../../intermediate/0002.bin"
+	db $ff
+
+InstDataStart:
+	incbin "../../intermediate/0002.inst.bin"
 	db $ff
 
 PitchTableLo:
