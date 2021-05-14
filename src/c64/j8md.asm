@@ -29,7 +29,17 @@ offset = $06
 temp = $07
 inst = $08
 ctl = $09
+ad = $0a
+sr = $0b
+snare_ch = $0c
+snare_pos = $0d
+channel = $0e
+sn_f_lo = $0f
+sn_f_hi = $10
+
 noteCache = $f7
+
+SNARE = 5
 
 	macro print,val,pos
 		pha
@@ -110,6 +120,10 @@ Init:
 	sta tickCount
 	sta irqCount
 
+	lda #$ff
+	sta snare_ch
+	sta snare_pos
+
 	lda #<MusicDataStart
 	sta dataPosLo
 	lda #>MusicDataStart
@@ -143,20 +157,107 @@ Isr:
 	sta tickCount
 skipResetTick:
 
-	print irqCount, 0
-	print tickCount, 4
+	;print irqCount, 0
+	;print tickCount, 4
+	print snare_ch, 0
+	print snare_pos, 4
 
 	jsr SoundDriver
 
 	asl INT_STATUS	; acknowledge the interrupt by clearing the VIC's interrupt flag
 	jmp $EA81
 
+; do the fast per-frame processing for sound
+AdvanceFrame:
+	lda snare_ch
+	bpl DoWork
+	rts
+
+DoWork
+	; set SID regs offset (*7)
+	tax
+	lda #-7
+AddOffset:
+	clc
+	adc #7
+	dex
+	bpl AddOffset
+
+	tax
+	lda snare_pos
+	beq SnareStart
+	cmp #1
+	beq SnareTail
+	jmp WorkSnare
+
+SnareStart:
+	lda #$00
+	sta SID_V1_CTL,x
+	lda #244
+	sta SID_V1_FREQ_1,x
+	lda #3
+	sta SID_V1_FREQ_2,x
+	sta SID_V1_PW_1,x
+	sta SID_V1_PW_2,x
+	lda #$0f
+	sta SID_V1_AD,x
+	lda #$00
+	sta SID_V1_SR,x
+	lda #%00100001
+	sta SID_V1_CTL,x
+	jmp IncSnarePos
+
+SnareTail:
+	lda #15
+	sta sn_f_lo
+	sta SID_V1_FREQ_1,x
+	lda #67
+	sta sn_f_hi
+	sta SID_V1_FREQ_2,x
+	lda #$06
+	sta SID_V1_AD,x
+	lda #$06
+	sta SID_V1_SR,x
+	lda #%10000001 ; noise
+	sta SID_V1_CTL,x
+	jmp IncSnarePos
+
+WorkSnare:
+	lda sn_f_lo
+	sec
+	sbc #4
+	bmi SkipLo
+	sta SID_V1_FREQ_1,x
+	sta sn_f_lo
+
+SkipLo:
+	lda sn_f_hi
+	sec
+	sbc #4
+	bmi IncSnarePos
+	sta SID_V1_FREQ_2,x
+	sta sn_f_hi
+
+IncSnarePos:
+	inc snare_pos
+	lda snare_pos
+	cmp #12
+	bne ExitAdvanceFrame
+
+	lda #$ff
+	sta snare_ch
+	sta snare_pos
+ExitAdvanceFrame:
+	rts
+
 SoundDriver:
+	jsr AdvanceFrame
 	lda tickCount
 	beq continueSound
 	jmp ExitSoundDriver
 continueSound:
 	ldx #$00
+	stx channel
 	stx offset
 loopChannels:
 
@@ -206,6 +307,9 @@ readNote:
 	jsr SetInstrument
 
 playNote:
+	lda ctl
+	beq skipItem
+
 	; gate off
 	lda #$00
 	ldy offset
@@ -218,10 +322,10 @@ playNote:
 	sta SID_V1_PW_2,y
 
 	; play note
-	lda #$06
+	lda ad
   	sta SID_V1_AD,y
 
-	lda #$00
+	lda sr
   	sta SID_V1_SR,y
 
 	lda ctl
@@ -237,6 +341,7 @@ skipItem:
 	inx
 	cpx #$03
 	beq ExitSoundDriver
+	stx channel
 	jmp loopChannels
 
 ExitSoundDriver:
@@ -258,6 +363,20 @@ SetPitch:
 ; - offset is current SID regs offset
 SetInstrument:
 	pushall
+
+	lda inst
+	cmp #SNARE
+	bne NotASnare
+
+	; trigger snare
+	lda channel
+	sta snare_ch
+	lda #0
+	sta snare_pos
+	sta ctl
+	jmp ExitSetInstrument
+
+NotASnare:
 	; instrument index to zero-based and aligned to instrument data (4 bytes)
 	dec inst
 	asl inst
@@ -266,7 +385,19 @@ SetInstrument:
 
 	; set osc
 	lda InstDataStart,x
+	and #%11110000
 	sta ctl
+	; amplitude envelope ref
+	lda InstDataStart,x
+	and #%00001111
+	; a env data is 2 bytes per entry
+	asl
+	tay
+	lda AEnvDataStart,y
+	sta ad
+	iny
+	lda AEnvDataStart,y
+	sta sr
 
 	inx
 	lda InstDataStart,x
@@ -274,6 +405,7 @@ SetInstrument:
 	lda InstDataStart,x
 	inx
 	lda InstDataStart,x
+ExitSetInstrument:
 	pullall
 	rts
 
@@ -283,6 +415,10 @@ MusicDataStart:
 
 InstDataStart:
 	incbin "../../intermediate/0002.inst.bin"
+	db $ff
+
+AEnvDataStart:
+	incbin "../../intermediate/0002.aenv.bin"
 	db $ff
 
 PitchTableLo:

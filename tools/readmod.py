@@ -2,6 +2,7 @@ import sys
 import pprint
 import os.path
 from struct import unpack
+from itertools import chain
 
 infilename = sys.argv[1]
 outfilename = sys.argv[2] if len(sys.argv) > 2 else None
@@ -19,14 +20,34 @@ PULSE =    0b01000000
 SAWTOOTH = 0b00100000
 TRIANGLE = 0b00010000
 
+# VALUE  	ATTACK RATE	DECAY/RELEASE RATE
+# 	Time/Cycle	Time/Cycle
+# - ------------------------------------------
+#  0	  2 ms		  6 ms
+#  1	  8 ms		 24 ms
+#  2	 16 ms		 48 ms
+#  3	 24 ms		 72 ms
+#  4	 38 ms		114 ms
+#  5	 56 ms		168 ms
+#  6	 68 ms		204 ms
+#  7	 80 ms		240 ms
+#  8	100 ms		300 ms
+#  9	240 ms		750 ms
+# 10	500 ms		1.5 s
+# 11	800 ms		2.4 s
+# 12	  1 s		  3 s
+# 13	  3 s		  9 s
+# 14	  5 s		 15 s
+# 15	  8 s		 24 s
+
 INSTRUMENTS = [
-    [KICK, {'osc': NOISE}],
-    [BASS, {'osc': SAWTOOTH}],
-    [LONG_LEAD, {'osc': PULSE}],
-    [LEAD, {'osc': PULSE}],
-    [CLAP, {'osc': NOISE}],
-    [HHC, {'osc': TRIANGLE}],
-    [HHO, {'osc': TRIANGLE}],
+    [KICK, {'osc': NOISE, 'aenv': [0, 6, 0, 2]}],
+    [BASS, {'osc': SAWTOOTH, 'aenv': [0, 6, 0, 2]}],
+    [LONG_LEAD, {'osc': PULSE, 'aenv': [5, 10, 0, 10]}],
+    [LEAD, {'osc': PULSE, 'aenv': [2, 6, 0, 4]}],
+    [CLAP, {'osc': NOISE, 'aenv': [0, 6, 0, 2]}],
+    [HHC, {'osc': TRIANGLE, 'aenv': [0, 6, 0, 2]}],
+    [HHO, {'osc': TRIANGLE, 'aenv': [0, 6, 0, 2]}],
 ]
 
 def ntstr(b):
@@ -135,6 +156,14 @@ def sorter(item):
     #    return 4
     return 100
 
+def output_channel(ins):
+    if ins == CLAP:
+        return 0
+    if ins == BASS or ins == KICK:
+        return 1
+    if ins == LEAD or ins == LONG_LEAD:
+        return 2
+    return None
 
 def write_bin(song, filename):
     out = []
@@ -150,25 +179,34 @@ def write_bin(song, filename):
         for i in range(0, pattern['rows']):
             items = sorted(list(filter(lambda x: x['row']==i, pattern['notes'])), key=sorter)
             #print("row", i, items)
-            for i in range(0, CHANNELS):
-                item = items[i] if len(items) > i else None
-                if item is None:
-                    out.append(REST)
-                else:
+            channel_out = [[REST] for x in range(0, CHANNELS)]
+            for item in items:
+                if any(x[0] == REST for x in channel_out):
                     memIns = mem[item['channel']]['ins'] if 'ins' in mem[item['channel']] else None
                     memNote = mem[item['channel']]['note'] if 'note' in mem[item['channel']] else None
                     ins = item['ins'] if 'ins' in item else memIns
                     note = item['note'] if 'note' in item else memNote
+                    output_ch = output_channel(ins)
+                    free_indexes = [i for i,x in enumerate(channel_out) if x[0] == REST]
+                    if output_ch is None or output_ch not in free_indexes:
+                        if len(free_indexes) > 0:
+                            output_ch = free_indexes[0]
+                        else:
+                            break
                     if ins == memIns and note == memNote:
-                        out.append(SAME)
+                        channel_out[output_ch] = [SAME]
                     else:
                         mem[item['channel']]['ins'] = ins
                         mem[item['channel']]['note'] = note
                         byte1 = to_pitch(note, ins)
                         # TODO support effect
                         byte2 = ins
-                        out.append(byte1)
-                        out.append(byte2)
+                        channel_out[output_ch] = [byte1, byte2]
+                else:
+                    break
+
+            out += chain.from_iterable(channel_out)
+
         count += 1
     (root, ext) = os.path.splitext(filename)
     outfile = outfilename if outfilename else os.path.split(root)[1] + '.bin'
@@ -181,9 +219,9 @@ def write_instruments(song, filename):
     (root, ext) = os.path.splitext(outfilename if outfilename else filename)
     outfile = root + '.inst.bin'
     out = []
-    for ins in INSTRUMENTS:
+    for (i, ins) in enumerate(INSTRUMENTS):
         data = ins[1]
-        byte1 = data['osc']
+        byte1 = data['osc'] | i
         byte2 = 0
         byte3 = 0
         byte4 = 0
@@ -195,6 +233,22 @@ def write_instruments(song, filename):
     with open(outfile, 'wb') as f:
         f.write(bytes(out))
     print("Wrote " + outfile)
+
+def write_envelopes(song, filename):
+    (root, ext) = os.path.splitext(outfilename if outfilename else filename)
+    outfile = root + '.aenv.bin'
+    out = []
+    for ins in INSTRUMENTS:
+        data = ins[1]
+        byte1 = data['aenv'][0]<<4 | data['aenv'][1]
+        byte2 = data['aenv'][2]<<4 | data['aenv'][3]
+        out.append(byte1)
+        out.append(byte2)
+
+    with open(outfile, 'wb') as f:
+        f.write(bytes(out))
+    print("Wrote " + outfile)
+
 
 def main():
     with open(infilename, 'rb') as f:
@@ -234,6 +288,7 @@ def main():
 
     write_bin(out, infilename)
     write_instruments(out, infilename)
+    write_envelopes(out, infilename)
 
 
 if __name__ == "__main__":
